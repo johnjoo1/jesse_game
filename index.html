@@ -97,11 +97,11 @@
     </div>
     <div class="keys desk-only">
       <b>WASD</b> move &nbsp;·&nbsp; <b>Mouse</b> aim &nbsp;·&nbsp; <b>Click</b> shoot<br>
-      <b>R</b> reload &nbsp;·&nbsp; <b>Shift</b> sprint
+      <b>R</b> reload &nbsp;·&nbsp; <b>Shift</b> sprint &nbsp;·&nbsp; <b>E</b> place defense
     </div>
     <div class="keys touch-only">
       <b>Left thumb</b> move &nbsp;·&nbsp; <b>Right thumb</b> aim + shoot<br>
-      Tap <b>⟳</b> to reload &nbsp;·&nbsp; <b>»</b> to sprint
+      Tap <b>⟳</b> to reload &nbsp;·&nbsp; <b>»</b> to sprint &nbsp;·&nbsp; the item button to place a defense
     </div>
     <div id="rotate">Turn your phone sideways for the best view</div>
   </div>
@@ -128,17 +128,29 @@
   const NUM_BOTS = 9;
   const COLORS = ['#ff3d7f', '#3da5ff', '#ffd23d', '#3dff8b', '#b03dff', '#ff8a3d', '#3dfff0', '#ff3d3d', '#9cff3d', '#ffffff'];
   // Power-ups: a splatted player sometimes drops one. Whoever grabs it keeps the boost until they're splatted.
+  // Defenses (place: true) go in your item slot instead; place one with E / right-click / the item button
+  // and it stays where you put it until its timer runs out or it's destroyed.
   // w = weight: out of every 100 drops, roughly this many are that kind (rarer = stronger).
   const DROP_CHANCE = 0.5;       // half of all splats drop something
   const DROP_LIFETIME = 20;      // seconds before an unclaimed drop fades away
   const POWERUPS = {
-    heart:  { w: 30, name: 'Extra Heart',   icon: '♥', color: '#ff4d6d', desc: '+1 max health and a full heal' },
-    rapid:  { w: 20, name: 'Rapid Fire',    icon: '⚡', color: '#ffd23d', desc: 'Shoot twice as fast' },
-    speed:  { w: 15, name: 'Speed Boots',   icon: '»', color: '#3dfff0', desc: 'Run 30% faster' },
-    mag:    { w: 15, name: 'Big Hopper',    icon: '▤', color: '#9cff3d', desc: '24 paintballs and faster reloads' },
-    triple: { w: 10, name: 'Triple Shot',   icon: '⁂', color: '#ff8a3d', desc: 'Every shot fires 3 paintballs' },
-    bubble: { w: 7,  name: 'Bubble Shield', icon: '◯', color: '#7fd4ff', desc: 'Blocks the next 3 hits' },
+    heart:  { w: 15, name: 'Extra Heart',   icon: '♥', color: '#ff4d6d', desc: '+1 max health and a full heal' },
+    rapid:  { w: 15, name: 'Rapid Fire',    icon: '⚡', color: '#ffd23d', desc: 'Shoot twice as fast' },
+    speed:  { w: 12, name: 'Speed Boots',   icon: '»', color: '#3dfff0', desc: 'Run 30% faster' },
+    mag:    { w: 12, name: 'Big Hopper',    icon: '▤', color: '#9cff3d', desc: '24 paintballs and faster reloads' },
+    triple: { w: 9,  name: 'Triple Shot',   icon: '⁂', color: '#ff8a3d', desc: 'Every shot fires 3 paintballs' },
     golden: { w: 3,  name: 'Golden Gun',    icon: '★', color: '#ffc800', desc: 'Every hit counts double' },
+    // Defenses: blue-green family so they read as "protect" from across the map
+    wall:   { w: 12, place: true, name: 'Barricade',     icon: '▮', color: '#a0b4c8', desc: 'A wall that blocks paintballs (8 hits, 40s)' },
+    heal:   { w: 9,  place: true, name: 'Heal Station',  icon: '✚', color: '#3dff8b', desc: 'Stand in it to heal (20s)' },
+    dome:   { w: 7,  place: true, name: 'Shield Dome',   icon: '◠', color: '#7fd4ff', desc: "Enemy paint can't get in (10s)" },
+    turret: { w: 6,  place: true, name: 'Sentry Turret', icon: '⊕', color: '#c78bff', desc: 'Shoots enemies near it (5 hits, 20s)' },
+  };
+  const DEPLOY = {
+    wall:   { ttl: 40, hp: 8 },
+    heal:   { ttl: 20, r: 60 },
+    dome:   { ttl: 10, r: 75 },
+    turret: { ttl: 20, hp: 5, range: 380, rate: 0.5 },
   };
   const BOT_NAMES = ['Splatty', 'Blobby', 'Drip', 'Smudge', 'Neon', 'Goober', 'Pellet', 'Squish', 'Rainbow', 'Sploosh', 'Zippy', 'Mango'];
 
@@ -192,6 +204,11 @@
   // circles: rocks (block movement + paintballs)
   // bushes: you can hide inside (block nothing, but hide you from bots)
   let rects = [], rocks = [], bushes = [];
+  let mapRects = [];      // the map's own walls and crates; rects = mapRects + placed barricades
+  let deploys = [], deployId = 0;
+  function rebuildRects() {
+    rects = mapRects.concat(deploys.filter(d => d.type === 'wall').map(d => ({ x: d.x - d.w / 2, y: d.y - d.h / 2, w: d.w, h: d.h, kind: 'barricade', dep: d })));
+  }
 
   // Same seed -> same map, so the host only has to send one number
   function mulberry32(a) {
@@ -204,6 +221,11 @@
   }
 
   function buildMap(seed) {
+    buildMapBase(seed);
+    mapRects = rects.slice();
+    deploys = [];
+  }
+  function buildMapBase(seed) {
     const R = mulberry32(seed), rr = (a, b) => a + R() * (b - a);
     rects = []; rocks = []; bushes = [];
     const t = 24;
@@ -299,8 +321,9 @@
     const t = clamp(((cx - x1) * dx + (cy - y1) * dy) / l2, 0, 1);
     return dist2(x1 + dx * t, y1 + dy * t, cx, cy) < r * r;
   }
-  function lineOfSight(x1, y1, x2, y2) {
-    for (const r of rects) if (segRect(x1, y1, x2, y2, r)) return false;
+  // ownerId: that player's own barricades don't block (their paint flies through their own wall)
+  function lineOfSight(x1, y1, x2, y2, ownerId) {
+    for (const r of rects) if ((!r.dep || r.dep.owner !== ownerId || ownerId === undefined) && segRect(x1, y1, x2, y2, r)) return false;
     for (const o of rocks) if (segCircle(x1, y1, x2, y2, o.x, o.y, o.r)) return false;
     return true;
   }
@@ -334,7 +357,7 @@
   function makePlayer(name, color, isBot, id) {
     return {
       id, name, color, isBot, remote: false, ss: 0,
-      buffs: {}, magSize: MAG_SIZE,
+      buffs: {}, magSize: MAG_SIZE, item: null, healT: 0,
       x: 0, y: 0, vx: 0, vy: 0, aim: 0,
       maxHp: isBot ? MAX_HP : PLAYER_HP,
       hp: MAX_HP, ammo: MAG_SIZE, reload: 0, cooldown: 0,
@@ -349,7 +372,7 @@
   function spawn(p) {
     const s = freeSpot();
     p.x = s.x; p.y = s.y;
-    p.buffs = {}; p.magSize = MAG_SIZE; p.maxHp = p.isBot ? MAX_HP : PLAYER_HP; // boosts end when you're splatted
+    p.buffs = {}; p.magSize = MAG_SIZE; p.item = null; p.maxHp = p.isBot ? MAX_HP : PLAYER_HP; // boosts end when you're splatted
     p.hp = p.maxHp; p.ammo = MAG_SIZE; p.reload = 0; p.cooldown = 0.3;
     p.stamina = STAMINA_MAX;
     p.alive = true; p.shield = SPAWN_SHIELD; p.target = null;
@@ -365,7 +388,7 @@
     for (const off of p.buffs.triple ? [-0.16, 0, 0.16] : [0]) {
       const a = p.aim + off + rand(-SPREAD, SPREAD);
       const sx = p.x + Math.cos(a) * (PLAYER_R + 8), sy = p.y + Math.sin(a) * (PLAYER_R + 8);
-      if (!lineOfSight(p.x, p.y, sx, sy)) { fx({ t: 'sp', x: sx, y: sy, c: p.color, s: 7 }); continue; }
+      if (!lineOfSight(p.x, p.y, sx, sy, p.id)) { fx({ t: 'sp', x: sx, y: sy, c: p.color, s: 7 }); continue; }
       balls.push({ x: sx, y: sy, vx: Math.cos(a) * BALL_SPEED, vy: Math.sin(a) * BALL_SPEED, life: BALL_LIFE, owner: p, color, dmg: p.buffs.golden ? 2 : 1 });
     }
     if (p.ammo === 0) startReload(p);
@@ -411,12 +434,6 @@
 
   function hitPlayer(victim, ball) {
     if (victim.shield > 0) { fx({ t: 'bu', x: ball.x, y: ball.y, c: '#ffffff', n: 6, v: 120 }); return; }
-    if (victim.buffs.bubble > 0) {
-      victim.buffs.bubble--;
-      if (!victim.buffs.bubble) delete victim.buffs.bubble;
-      fx({ t: 'bu', x: ball.x, y: ball.y, c: '#7fd4ff', n: 12, v: 180 });
-      return;
-    }
     victim.hp = Math.max(0, victim.hp - (ball.dmg || 1));
     fx({ t: 'hit', v: victim.id, k: ball.owner.id, x: ball.x, y: ball.y, c: ball.color, px: victim.x, py: victim.y, dead: victim.hp <= 0 });
     if (victim.hp <= 0) kill(victim, ball.owner);
@@ -449,12 +466,69 @@
     } else if (type === 'mag') {
       b.mag = 1; p.magSize = MAG_SIZE * 2;
       if (!p.reload) p.ammo = p.magSize;
-    } else if (type === 'bubble') {
-      b.bubble = 3;
+    } else if (POWERUPS[type].place) {
+      p.item = type; // one item slot: a new defense replaces the one you were carrying
     } else {
       b[type] = 1;
     }
   }
+  function useItem(p) {
+    if (!p.alive || !p.item || !DEPLOY[p.item]) return;
+    const type = p.item, cfg = DEPLOY[type];
+    p.item = null;
+    const ca = Math.cos(p.aim), sa = Math.sin(p.aim);
+    const d = { id: ++deployId, type, owner: p.id, color: p.color, ttl: cfg.ttl, hp: cfg.hp || 0, x: p.x, y: p.y, aim: p.aim, cool: 0 };
+    if (type === 'wall') {
+      // Stands across your line of fire, a step in front of you
+      d.x = p.x + ca * 50; d.y = p.y + sa * 50;
+      const across = Math.abs(ca) >= Math.abs(sa);
+      d.w = across ? 20 : 110; d.h = across ? 110 : 20;
+    } else if (type === 'turret') {
+      d.x = p.x + ca * 34; d.y = p.y + sa * 34;
+    }
+    d.x = clamp(d.x, 20, WORLD - 20); d.y = clamp(d.y, 20, WORLD - 20);
+    deploys.push(d);
+    if (type === 'wall') rebuildRects();
+    fx({ t: 'dep', k: type, p: p.id, x: d.x, y: d.y });
+  }
+  function removeDeploy(d, broke) {
+    deploys = deploys.filter(q => q !== d);
+    if (d.type === 'wall') rebuildRects();
+    if (broke) fx({ t: 'bu', x: d.x, y: d.y, c: POWERUPS[d.type].color, n: 24, v: 260 });
+  }
+  function updateDeploys(dt) {
+    for (const d of deploys.slice()) {
+      d.ttl -= dt;
+      if (d.ttl <= 0 || (DEPLOY[d.type].hp && d.hp <= 0)) { removeDeploy(d, d.ttl > 0); continue; }
+      const owner = players.find(q => q.id === d.owner);
+      if (d.type === 'heal' && owner && owner.alive && dist2(owner.x, owner.y, d.x, d.y) < DEPLOY.heal.r ** 2) {
+        owner.healT += dt;
+        if (owner.healT >= 1.5 && owner.hp < owner.maxHp) { owner.healT = 0; owner.hp++; fx({ t: 'heal', p: owner.id, x: owner.x, y: owner.y }); }
+      }
+      if (d.type === 'turret' && owner) {
+        d.cool -= dt;
+        let best = null, bestD = DEPLOY.turret.range ** 2;
+        for (const o of players) {
+          if (o === owner || !o.alive || o.shield > 0) continue;
+          const dd = dist2(d.x, d.y, o.x, o.y);
+          if (dd > bestD || (inBush(o) && dd > 110 * 110) || !lineOfSight(d.x, d.y, o.x, o.y, d.owner)) continue;
+          best = o; bestD = dd;
+        }
+        if (best) {
+          const lead = Math.sqrt(bestD) / BALL_SPEED * 0.5;
+          d.aim = Math.atan2(best.y + best.vy * lead - d.y, best.x + best.vx * lead - d.x);
+          if (d.cool <= 0) {
+            d.cool = DEPLOY.turret.rate;
+            const a = d.aim + rand(-0.06, 0.06);
+            // The turret's paintballs count as its owner's, so its splats go on their score
+            balls.push({ x: d.x + Math.cos(a) * 20, y: d.y + Math.sin(a) * 20, vx: Math.cos(a) * BALL_SPEED, vy: Math.sin(a) * BALL_SPEED,
+              life: BALL_LIFE, owner, color: owner.color, dmg: 1 });
+          }
+        }
+      }
+    }
+  }
+
   function updateDrops(dt) {
     for (let i = drops.length - 1; i >= 0; i--) {
       const d = drops[i];
@@ -481,13 +555,22 @@
     else if (e.t === 'bu') burst(e.x, e.y, e.c, e.n, e.v);
     else if (e.t === 'imp') { splat(e.x, e.y, e.c, 8); burst(e.x, e.y, e.c, 5, 120); }
     else if (e.t === 'msg') addFeed(e.s, false);
+    else if (e.t === 'dep') {
+      const pu = POWERUPS[e.k];
+      if (pu) burst(e.x, e.y, pu.color, 18, 200);
+      if (e.p === myId) sound('pick');
+    } else if (e.t === 'heal') {
+      burst(e.x, e.y, '#3dff8b', 8, 120);
+      if (e.p === myId) popups.push({ x: e.x, y: e.y - 30, t: 0, text: '+1 ♥', color: '#3dff8b' });
+    }
     else if (e.t === 'pick') {
       const pu = POWERUPS[e.k];
       if (!pu) return;
       burst(e.x, e.y, pu.color, 16, 220);
       if (e.p === myId) {
         popups.push({ x: e.x, y: e.y - 30, t: 0, text: pu.name.toUpperCase() + '!', color: pu.color });
-        banner = { text: `${pu.icon} ${pu.name}!`, sub: pu.desc + ' until you get splatted', t: 2.6, color: pu.color };
+        const how = touchMode ? `tap ${pu.icon} to place it` : 'press E (or right-click) to place it';
+        banner = { text: `${pu.icon} ${pu.name}!`, sub: pu.place ? `${pu.desc}: ${how}` : pu.desc + ' until you get splatted', t: 2.6, color: pu.color };
         sound('pick');
       } else if (e.k === 'golden') {
         addFeed(`${e.pn} grabbed the Golden Gun! ★`, false);
@@ -544,6 +627,7 @@
     return {
       reload: { x: W - 60, y: H - 205, r: 30, label: '⟳' },
       sprint: { x: W - 140, y: H - 205, r: 30, label: '»' },
+      item: { x: W - 220, y: H - 205, r: 30, label: me && me.item ? POWERUPS[me.item].icon : '' },
     };
   }
   function touchDown(id, x, y) {
@@ -551,6 +635,7 @@
     const btn = touchButtons();
     if (dist2(x, y, btn.reload.x, btn.reload.y) < (btn.reload.r + 10) ** 2) { requestReload(); return; }
     if (dist2(x, y, btn.sprint.x, btn.sprint.y) < (btn.sprint.r + 10) ** 2) { sprintOn = !sprintOn; return; }
+    if (me.item && dist2(x, y, btn.item.x, btn.item.y) < (btn.item.r + 10) ** 2) { requestUse(); return; }
     const st = { id, bx: x, by: y, x, y };
     if (x < W / 2) { if (!sticks.move) sticks.move = st; }
     else if (!sticks.aim) sticks.aim = st;
@@ -574,6 +659,7 @@
       setTouchMode(false);
       mouseX = e.clientX; mouseY = e.clientY;
       if (e.button === 0) mouseDown = true;
+      if (e.button === 2 && running && me && me.alive) requestUse();
       return;
     }
     e.preventDefault();
@@ -590,6 +676,7 @@
     touchUp(e.pointerId);
   });
   window.addEventListener('pointercancel', e => touchUp(e.pointerId));
+  canvas.addEventListener('contextmenu', e => e.preventDefault()); // right-click places your item
   window.addEventListener('touchstart', () => setTouchMode(true), { passive: true });
 
   window.addEventListener('keydown', e => {
@@ -597,6 +684,7 @@
     setTouchMode(false);
     keys[e.code] = true;
     if (e.code === 'KeyR' && me && me.alive) requestReload();
+    if ((e.code === 'KeyE' || e.code === 'KeyQ') && me && me.alive && !e.repeat) requestUse();
   });
   window.addEventListener('keyup', e => { keys[e.code] = false; });
   window.addEventListener('blur', () => { for (const k in keys) keys[k] = false; mouseDown = false; sticks.move = sticks.aim = null; });
@@ -613,7 +701,7 @@
         const d = dist2(b.x, b.y, o.x, o.y);
         if (d > bestD) continue;
         if (inBush(o) && d > 110 * 110) continue;
-        if (!lineOfSight(b.x, b.y, o.x, o.y)) continue;
+        if (!lineOfSight(b.x, b.y, o.x, o.y, b.id)) continue;
         best = o; bestD = d;
       }
       if (best && best !== b.target) b.reactT = rand(0.5, 0.9); // reaction delay on new target
@@ -639,6 +727,8 @@
       if (b.hp === 1 && b.ammo < 3) { mx = -ux; my = -uy; } // retreat when weak
       b.reactT -= dt;
       if (b.reactT <= 0 && b.reload <= 0 && Math.random() < 0.18) shoot(b);
+      // Bots put their defense down in a fight (a heal station only once they're hurt)
+      if (b.item && b.reactT <= 0 && (b.item !== 'heal' || b.hp < b.maxHp) && Math.random() < 0.02) useItem(b);
     } else {
       const d = drops.find(d => dist2(b.x, b.y, d.x, d.y) < 300 * 300 && lineOfSight(b.x, b.y, d.x, d.y));
       if (d) b.wanderA = Math.atan2(d.y - b.y, d.x - b.x);
@@ -661,12 +751,17 @@
       if (inBush(o) && dist2(p.x, p.y, o.x, o.y) > 110 * 110) continue;
       const oa = Math.atan2(o.y - p.y, o.x - p.x);
       const diff = Math.abs(Math.atan2(Math.sin(oa - a), Math.cos(oa - a)));
-      if (diff < bestDiff && lineOfSight(p.x, p.y, o.x, o.y)) { best = oa; bestDiff = diff; }
+      if (diff < bestDiff && lineOfSight(p.x, p.y, o.x, o.y, p.id)) { best = oa; bestDiff = diff; }
     }
     return best;
   }
 
-  let reloadSeq = 0;
+  let reloadSeq = 0, useSeq = 0;
+  function requestUse() {
+    if (!me || !me.item) return;
+    if (mode === 'client') useSeq++;
+    else useItem(me);
+  }
   function requestReload() {
     if (mode === 'client') reloadSeq++;
     else startReload(me);
@@ -743,6 +838,7 @@
           }
           p.aim = inp.aim;
           if (inp.rl !== p.rlSeen) { p.rlSeen = inp.rl; startReload(p); }
+          if (inp.use !== p.useSeen) { if (p.useSeen !== undefined) useItem(p); p.useSeen = inp.use; }
           if (inp.fire) shoot(p);
         }
       } else {
@@ -764,6 +860,7 @@
     }
 
     updateDrops(dt);
+    updateDeploys(dt);
 
     // Paintballs
     for (let i = balls.length - 1; i >= 0; i--) {
@@ -772,18 +869,39 @@
       bl.x += bl.vx * dt; bl.y += bl.vy * dt;
       bl.life -= dt;
       let dead = false;
-      if (!lineOfSight(ox, oy, bl.x, bl.y) || bl.x < 0 || bl.y < 0 || bl.x > WORLD || bl.y > WORLD) {
+      if (!lineOfSight(ox, oy, bl.x, bl.y, bl.owner.id) || bl.x < 0 || bl.y < 0 || bl.x > WORLD || bl.y > WORLD) {
         // Binary search back along the step for the impact point
         const ex = bl.x, ey = bl.y;
         let lo = 0, hi = 1;
         for (let s = 0; s < 6; s++) {
           const mid = (lo + hi) / 2;
-          if (lineOfSight(ox, oy, ox + (ex - ox) * mid, oy + (ey - oy) * mid)) lo = mid; else hi = mid;
+          if (lineOfSight(ox, oy, ox + (ex - ox) * mid, oy + (ey - oy) * mid, bl.owner.id)) lo = mid; else hi = mid;
         }
         bl.x = ox + (ex - ox) * lo; bl.y = oy + (ey - oy) * lo;
         fx({ t: 'imp', x: bl.x, y: bl.y, c: bl.color });
         dead = true;
-      } else {
+        // Did it hit a barricade? (Your own paint flies through your own, so this is always an enemy's.)
+        const ix = bl.x + bl.vx * 0.012, iy = bl.y + bl.vy * 0.012;
+        const wall = deploys.find(d => d.type === 'wall' &&
+          Math.abs(ix - d.x) <= d.w / 2 + 2 && Math.abs(iy - d.y) <= d.h / 2 + 2);
+        if (wall) wall.hp--;
+      }
+      if (!dead) {
+        // Shield domes stop enemy paint at the edge; paint already inside, or the owner's, passes
+        for (const d of deploys) {
+          if (d.type === 'dome' && d.owner !== bl.owner.id &&
+              dist2(bl.x, bl.y, d.x, d.y) < DEPLOY.dome.r ** 2 && dist2(ox, oy, d.x, d.y) >= DEPLOY.dome.r ** 2) {
+            fx({ t: 'bu', x: bl.x, y: bl.y, c: '#7fd4ff', n: 8, v: 150 });
+            dead = true; break;
+          }
+          if (d.type === 'turret' && d.owner !== bl.owner.id && segCircle(ox, oy, bl.x, bl.y, d.x, d.y, 16 + BALL_R)) {
+            d.hp--;
+            fx({ t: 'imp', x: bl.x, y: bl.y, c: bl.color });
+            dead = true; break;
+          }
+        }
+      }
+      if (!dead) {
         for (const p of players) {
           if (!p.alive || p === bl.owner) continue;
           if (segCircle(ox, oy, bl.x, bl.y, p.x, p.y, PLAYER_R + BALL_R)) {
@@ -911,7 +1029,7 @@
         conn.player.inp = {
           x: clamp(num(m.x), 0, WORLD), y: clamp(num(m.y), 0, WORLD),
           vx: num(m.vx), vy: num(m.vy), aim: num(m.aim),
-          fire: !!m.fire, rl: num(m.rl), ss: num(m.ss),
+          fire: !!m.fire, rl: num(m.rl), ss: num(m.ss), use: num(m.use),
         };
       }
     });
@@ -957,9 +1075,10 @@
       t: 's',
       p: players.map(p => [p.id, p.name, p.color, p.isBot ? 1 : 0, Math.round(p.x), Math.round(p.y), Math.round(p.aim * 100) / 100,
         p.hp, p.maxHp, p.alive ? 1 : 0, r1(p.respawn), r1(p.shield), p.kills, p.deaths, p.streak, p.ammo, r1(p.reload), p.ss,
-        Math.round(p.vx), Math.round(p.vy), p.buffs, p.magSize]),
+        Math.round(p.vx), Math.round(p.vy), p.buffs, p.magSize, p.item]),
       b: balls.map(b => [Math.round(b.x), Math.round(b.y), Math.round(b.vx), Math.round(b.vy), b.color]),
       d: drops.map(d => [d.id, Math.round(d.x), Math.round(d.y), d.type, Math.round(d.ttl * 10) / 10]),
+      dp: deploys.map(d => [d.id, d.type, d.owner, d.color, Math.round(d.x), Math.round(d.y), d.w || 0, d.h || 0, r1(d.ttl), d.hp, Math.round(d.aim * 100) / 100]),
       fx: outbox,
     };
     outbox = [];
@@ -1032,12 +1151,12 @@
     if (!Array.isArray(m.p) || !Array.isArray(m.b)) return;
     const seen = new Set();
     for (const a of m.p) {
-      const [id, name, color, bot, x, y, aim, hp, maxHp, alive, respawn, shield, kills, deaths, streak, ammo, reload, ss, vx, vy, buffs, magSize] = a;
+      const [id, name, color, bot, x, y, aim, hp, maxHp, alive, respawn, shield, kills, deaths, streak, ammo, reload, ss, vx, vy, buffs, magSize, item] = a;
       seen.add(id);
       let p = players.find(q => q.id === id);
       if (!p) { p = makePlayer(name, color, !!bot, id); p.x = p.tx = x; p.y = p.ty = y; players.push(p); }
       Object.assign(p, { name, color, hp, maxHp, alive: !!alive, respawn, shield, kills, deaths, streak,
-        buffs: buffs && typeof buffs === 'object' ? buffs : {}, magSize: num(magSize, MAG_SIZE) });
+        buffs: buffs && typeof buffs === 'object' ? buffs : {}, magSize: num(magSize, MAG_SIZE), item: DEPLOY[item] ? item : null });
       if (p === me) {
         p.ammo = ammo; p.reload = reload; p.joined = true;
         if (ss !== p.ss) { p.ss = ss; p.x = x; p.y = y; p.stamina = STAMINA_MAX; }
@@ -1049,6 +1168,10 @@
     players = players.filter(p => seen.has(p.id));
     balls = m.b.map(([x, y, vx, vy, c]) => ({ x, y, vx, vy, color: c }));
     if (Array.isArray(m.d)) drops = m.d.filter(d => POWERUPS[d[3]]).map(([id, x, y, type, ttl]) => ({ id, x, y, type, ttl }));
+    if (Array.isArray(m.dp)) {
+      deploys = m.dp.filter(d => DEPLOY[d[1]]).map(([id, type, owner, color, x, y, w, h, ttl, hp, aim]) => ({ id, type, owner, color, x, y, w, h, ttl, hp, aim }));
+      rebuildRects(); // so you bump into a friend's barricade on your own screen too
+    }
     if (Array.isArray(m.fx)) for (const e of m.fx) applyFx(e);
   }
 
@@ -1064,12 +1187,13 @@
     }
     for (const b of balls) { b.x += b.vx * dt; b.y += b.vy * dt; }
     for (const d of drops) d.ttl -= dt;
+    for (const d of deploys) d.ttl -= dt;
     sendTimer -= dt;
     if (sendTimer <= 0 && hostConn && hostConn.open) {
       sendTimer = 1 / 30;
       try {
         hostConn.send({ t: 'in', x: Math.round(me.x), y: Math.round(me.y), vx: Math.round(me.vx), vy: Math.round(me.vy),
-          aim: Math.round(me.aim * 100) / 100, fire: fire && me.ammo > 0, rl: reloadSeq, ss: me.ss });
+          aim: Math.round(me.aim * 100) / 100, fire: fire && me.ammo > 0, rl: reloadSeq, use: useSeq, ss: me.ss });
       } catch (e) { /* dropped connection */ }
     }
   }
@@ -1136,13 +1260,13 @@
       try { save.paint = null; sessionStorage.setItem(SAVE_KEY, JSON.stringify(save)); } catch (e2) { /* can't save */ }
     }
   }
-  const SAVED_FIELDS = ['id', 'name', 'color', 'isBot', 'remote', 'ss', 'buffs', 'magSize', 'x', 'y', 'aim', 'maxHp', 'hp',
+  const SAVED_FIELDS = ['id', 'name', 'color', 'isBot', 'remote', 'ss', 'buffs', 'magSize', 'item', 'x', 'y', 'aim', 'maxHp', 'hp',
     'ammo', 'reload', 'cooldown', 'stamina', 'alive', 'respawn', 'shield', 'kills', 'deaths', 'streak', 'wanderA', 'strafe'];
   function serializeGame() {
     return {
       f: SAVE_FORMAT, at: Date.now(), mode, roomCode, mapSeed, nextId, dropId, myId: me.id, camX, camY,
       players: players.map(p => Object.fromEntries(SAVED_FIELDS.map(k => [k, p[k]]))),
-      drops, feed, paint: paintData(),
+      drops, deploys, deployId, feed, paint: paintData(),
     };
   }
   function saveAndReload() {
@@ -1171,6 +1295,8 @@
       if (COLORS.includes(me.color)) chosen = me.color;
       balls = []; particles = []; rings = []; popups = []; outbox = []; banner = null;
       drops = Array.isArray(sv.drops) ? sv.drops : [];
+      deploys = Array.isArray(sv.deploys) ? sv.deploys : []; deployId = sv.deployId || 0;
+      rebuildRects();
       feed = Array.isArray(sv.feed) ? sv.feed : [];
       camX = sv.camX; camY = sv.camY;
       document.getElementById('menu').style.display = 'none';
@@ -1223,12 +1349,6 @@
     ctx.fillRect(6, -8, 5, 16);
     ctx.restore();
 
-    if (p.buffs.bubble > 0) {
-      ctx.globalAlpha = 0.25 + 0.1 * p.buffs.bubble;
-      ctx.fillStyle = '#7fd4ff';
-      ctx.beginPath(); ctx.arc(0, 0, PLAYER_R + 10, 0, Math.PI * 2); ctx.fill();
-      ctx.globalAlpha = 1;
-    }
     if (p.buffs.speed && Math.hypot(p.vx, p.vy) > 50) {
       ctx.globalAlpha = 0.5; ctx.strokeStyle = '#3dfff0'; ctx.lineWidth = 3;
       const a = Math.atan2(p.vy, p.vx) + Math.PI;
@@ -1294,7 +1414,23 @@
       ctx.fillStyle = 'rgba(0,0,0,.25)'; ctx.beginPath(); ctx.arc(o.x + 6, o.y + 6, o.r, 0, Math.PI * 2); ctx.fill();
     }
     for (const r of rects) {
-      if (r.kind === 'crate') {
+      if (r.kind === 'barricade') {
+        // Steel wall in the owner's color, cracking as it takes hits
+        const d = r.dep, k = d.hp / DEPLOY.wall.hp;
+        if (d.ttl < 4 && Math.floor(d.ttl * 6) % 2 === 0) ctx.globalAlpha = 0.5;
+        ctx.fillStyle = '#5d6b7a'; ctx.fillRect(r.x, r.y, r.w, r.h);
+        ctx.fillStyle = d.color; ctx.globalAlpha *= 0.55;
+        if (r.w > r.h) ctx.fillRect(r.x, r.y + r.h / 2 - 3, r.w, 6); else ctx.fillRect(r.x + r.w / 2 - 3, r.y, 6, r.h);
+        ctx.globalAlpha = 1;
+        ctx.strokeStyle = '#2e3742'; ctx.lineWidth = 2; ctx.strokeRect(r.x + 1, r.y + 1, r.w - 2, r.h - 2);
+        if (k < 0.75) {
+          ctx.strokeStyle = 'rgba(0,0,0,.55)'; ctx.lineWidth = 2; ctx.beginPath();
+          const cx = r.x + r.w / 2, cy = r.y + r.h / 2, L = Math.max(r.w, r.h) * (1 - k) * 0.5;
+          if (r.w > r.h) { ctx.moveTo(cx - L, cy - 4); ctx.lineTo(cx, cy + 4); ctx.lineTo(cx + L, cy - 3); }
+          else { ctx.moveTo(cx - 4, cy - L); ctx.lineTo(cx + 4, cy); ctx.lineTo(cx - 3, cy + L); }
+          ctx.stroke();
+        }
+      } else if (r.kind === 'crate') {
         ctx.fillStyle = '#b07b3e'; ctx.fillRect(r.x, r.y, r.w, r.h);
         ctx.strokeStyle = '#7a5226'; ctx.lineWidth = 4; ctx.strokeRect(r.x + 2, r.y + 2, r.w - 4, r.h - 4);
         ctx.beginPath(); ctx.moveTo(r.x + 4, r.y + 4); ctx.lineTo(r.x + r.w - 4, r.y + r.h - 4);
@@ -1329,6 +1465,37 @@
       ctx.restore();
     }
 
+    // Heal stations and turrets sit on the ground under players
+    for (const d of deploys) {
+      const fading = d.ttl < 4 && Math.floor(d.ttl * 6) % 2 === 0;
+      ctx.save();
+      ctx.globalAlpha = fading ? 0.4 : 1;
+      if (d.type === 'heal') {
+        const R = DEPLOY.heal.r;
+        ctx.fillStyle = 'rgba(61,255,139,.18)'; ctx.strokeStyle = 'rgba(61,255,139,.8)'; ctx.lineWidth = 3;
+        ctx.setLineDash([10, 8]);
+        ctx.beginPath(); ctx.arc(d.x, d.y, R, now * 0.6, now * 0.6 + Math.PI * 2); ctx.fill(); ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.fillStyle = '#3dff8b'; const pl = 8 + Math.sin(now * 5) * 1.5;
+        ctx.fillRect(d.x - pl * 2, d.y - pl / 2, pl * 4, pl); ctx.fillRect(d.x - pl / 2, d.y - pl * 2, pl, pl * 4);
+        ctx.strokeStyle = d.color; ctx.lineWidth = 4;   // timer ring in the owner's color
+        ctx.beginPath(); ctx.arc(d.x, d.y, R + 6, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * (d.ttl / DEPLOY.heal.ttl)); ctx.stroke();
+      } else if (d.type === 'turret') {
+        ctx.fillStyle = 'rgba(0,0,0,.25)'; ctx.beginPath(); ctx.arc(d.x + 4, d.y + 4, 17, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = '#3a3f4a'; ctx.beginPath(); ctx.arc(d.x, d.y, 17, 0, Math.PI * 2); ctx.fill();
+        ctx.strokeStyle = d.color; ctx.lineWidth = 3; ctx.stroke();
+        ctx.save(); ctx.translate(d.x, d.y); ctx.rotate(d.aim);
+        ctx.fillStyle = '#222'; ctx.fillRect(4, -4, 20, 8);
+        ctx.restore();
+        ctx.fillStyle = '#c78bff'; ctx.beginPath(); ctx.arc(d.x, d.y, 7, 0, Math.PI * 2); ctx.fill();
+        for (let i = 0; i < DEPLOY.turret.hp; i++) {
+          ctx.fillStyle = i < d.hp ? '#c78bff' : 'rgba(0,0,0,.35)';
+          ctx.beginPath(); ctx.arc(d.x + (i - 2) * 8, d.y - 26, 3, 0, Math.PI * 2); ctx.fill();
+        }
+      }
+      ctx.restore();
+    }
+
     // Paintballs
     for (const b of balls) {
       ctx.fillStyle = b.color; ctx.beginPath(); ctx.arc(b.x, b.y, BALL_R, 0, Math.PI * 2); ctx.fill();
@@ -1336,6 +1503,21 @@
     }
 
     for (const p of players) if (p.alive) drawPlayer(p);
+
+    // Shield domes over everything they protect
+    for (const d of deploys) {
+      if (d.type !== 'dome') continue;
+      const R = DEPLOY.dome.r, fading = d.ttl < 3 && Math.floor(d.ttl * 6) % 2 === 0;
+      ctx.save();
+      ctx.globalAlpha = fading ? 0.35 : 1;
+      const g = ctx.createRadialGradient(d.x - R * 0.3, d.y - R * 0.3, R * 0.1, d.x, d.y, R);
+      g.addColorStop(0, 'rgba(255,255,255,.18)'); g.addColorStop(1, 'rgba(127,212,255,.32)');
+      ctx.fillStyle = g; ctx.beginPath(); ctx.arc(d.x, d.y, R, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = 'rgba(127,212,255,.9)'; ctx.lineWidth = 3; ctx.stroke();
+      ctx.strokeStyle = d.color; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.arc(d.x, d.y, R + 5, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * (d.ttl / DEPLOY.dome.ttl)); ctx.stroke();
+      ctx.restore();
+    }
 
     // Bushes drawn on top so players hide in them
     for (const b of bushes) {
@@ -1439,13 +1621,14 @@
         ctx.beginPath(); ctx.arc(cx + (i - (me.magSize - 1) / 2) * g2, by, compact ? 4 : 5, 0, Math.PI * 2); ctx.fill();
       }
       // Active boosts, shown as chips above the ammo
-      const active = Object.keys(POWERUPS).filter(k => k === 'heart' ? me.maxHp > PLAYER_HP : me.buffs[k]);
+      const active = Object.keys(POWERUPS).filter(k => k === 'heart' ? me.maxHp > PLAYER_HP : POWERUPS[k].place ? me.item === k : me.buffs[k]);
       if (active.length) {
         ctx.font = compact ? 'bold 11px system-ui' : 'bold 12px system-ui';
         const labels = active.map(k => {
           const pu = POWERUPS[k];
-          const extra = k === 'bubble' ? ` ×${me.buffs.bubble}` : k === 'heart' ? ` +${me.maxHp - PLAYER_HP}` : '';
-          return { pu, text: compact ? pu.icon + extra : `${pu.icon} ${pu.name}${extra}` };
+          const extra = k === 'heart' ? ` +${me.maxHp - PLAYER_HP}` : '';
+          const key = pu.place && !touchMode ? 'E: ' : '';
+          return { pu, text: compact ? key + pu.icon + extra : `${key}${pu.icon} ${pu.name}${extra}` };
         });
         const widths = labels.map(l => ctx.measureText(l.text).width + 14);
         let x = cx - (widths.reduce((a, b) => a + b, 0) + 6 * (labels.length - 1)) / 2;
@@ -1476,6 +1659,11 @@
     ctx.fillStyle = 'rgba(200,200,210,.6)';
     for (const r of rects) ctx.fillRect(mx0 + r.x * s, my0 + r.y * s, Math.max(1, r.w * s), Math.max(1, r.h * s));
     for (const o of rocks) { ctx.beginPath(); ctx.arc(mx0 + o.x * s, my0 + o.y * s, o.r * s, 0, Math.PI * 2); ctx.fill(); }
+    for (const d of deploys) {
+      if (d.type === 'wall') continue; // already drawn with the walls
+      ctx.strokeStyle = POWERUPS[d.type].color; ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.arc(mx0 + d.x * s, my0 + d.y * s, 4, 0, Math.PI * 2); ctx.stroke();
+    }
     for (const d of drops) {
       ctx.fillStyle = POWERUPS[d.type].color;
       ctx.beginPath(); ctx.arc(mx0 + d.x * s, my0 + d.y * s, 2.5, 0, Math.PI * 2); ctx.fill();
@@ -1569,10 +1757,11 @@
     drawStick(sticks.aim, W - 100, H - 95, 'AIM + SHOOT');
 
     const btn = touchButtons();
-    for (const k of ['reload', 'sprint']) {
+    for (const k of ['reload', 'sprint', 'item']) {
       const b = btn[k];
+      if (k === 'item' && !me.item) continue;
       const active = (k === 'sprint' && sprintOn) || (k === 'reload' && me.reload > 0);
-      ctx.fillStyle = active ? me.color : 'rgba(0,0,0,.4)';
+      ctx.fillStyle = k === 'item' ? POWERUPS[me.item].color : active ? me.color : 'rgba(0,0,0,.4)';
       ctx.strokeStyle = 'rgba(255,255,255,.8)'; ctx.lineWidth = 2;
       ctx.beginPath(); ctx.arc(b.x, b.y, b.r, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
       ctx.fillStyle = '#fff'; ctx.font = 'bold 24px system-ui'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
@@ -1611,7 +1800,7 @@
     mapSeed = mode === 'client' ? opts.seed : (Math.random() * 1e9) | 0;
     buildMap(mapSeed);
     pctx.clearRect(0, 0, paint.width, paint.height);
-    players = []; balls = []; particles = []; feed = []; rings = []; popups = []; banner = null; outbox = []; drops = [];
+    players = []; balls = []; particles = []; feed = []; rings = []; popups = []; banner = null; outbox = []; drops = []; deploys = []; rebuildRects();
     me = makePlayer(name, chosen, false, mode === 'client' ? opts.id : 'h');
     players.push(me);
     if (mode === 'client') {

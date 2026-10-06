@@ -8,31 +8,31 @@ Open `index.html` in a browser. Nothing needs to be installed.
 
 ## Power-ups
 
-Half of all splats drop a power-up where the player went down. Walk over it to grab it.
-It lasts until you get splatted, and bots grab them too. Unclaimed drops fade after 20 seconds.
+Half of all splats drop something where the player went down. Walk over it to grab it.
+Bots grab them too, and unclaimed drops fade after 20 seconds.
+
+**Boosts** work right away and last until you get splatted:
 
 | Power-up | Chance | What it does |
 |---|---|---|
-| ♥ Extra Heart | 30% | +1 max health (up to +3) and a full heal |
-| ⚡ Rapid Fire | 20% | Shoot twice as fast |
-| » Speed Boots | 15% | Run 30% faster |
-| ▤ Big Hopper | 15% | 24 paintballs and faster reloads |
-| ⁂ Triple Shot | 10% | Every shot fires 3 paintballs |
-| ◯ Bubble Shield | 7% | Blocks the next 3 hits |
+| ♥ Extra Heart | 15% | +1 max health (up to +3) and a full heal |
+| ⚡ Rapid Fire | 15% | Shoot twice as fast |
+| » Speed Boots | 12% | Run 30% faster |
+| ▤ Big Hopper | 12% | 24 paintballs and faster reloads |
+| ⁂ Triple Shot | 9% | Every shot fires 3 paintballs |
 | ★ Golden Gun | 3% | Every hit counts double |
 
-Chances are per drop. With half of splats dropping something, a Golden Gun turns up about once every 67 splats.
+**Defenses** go in your item slot (one at a time). Place one with **E** or right-click
+(or the item button on a phone) and it stays put until its timer runs out or it's destroyed:
 
-## Playing with friends
+| Defense | Chance | What it does |
+|---|---|---|
+| ▮ Barricade | 12% | A wall across your line of fire. Blocks enemy paint, but yours flies through it. Breaks after 8 hits; lasts 40s |
+| ✚ Heal Station | 9% | Stand in it to heal 1 health every 1.5s. Lasts 20s |
+| ◠ Shield Dome | 7% | Enemy paint can't get in; you can shoot out. Lasts 10s |
+| ⊕ Sentry Turret | 6% | Shoots enemies within range; its splats count for you. Breaks after 5 hits; lasts 20s |
 
-1. One person taps **Host a game**. A 4-letter room code shows at the top of their screen.
-2. Friends open the same page, type the code and tap **Join**.
-3. Everyone shares one arena with the bots. Bots are removed as more friends join (up to 8 players).
-
-This is peer-to-peer: the host's device runs the game and friends connect straight to it,
-using the free PeerJS service to find each other. Nobody needs an account. If the host
-leaves, the game ends for everyone. Some school or work networks block these direct
-connections. Multiplayer doesn't work in the Claude artifact version, so use the GitHub Pages link.
+Chances are per drop, so a Golden Gun turns up about once every 67 splats.
 
 ## Updates without losing your game
 
