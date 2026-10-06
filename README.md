@@ -61,7 +61,7 @@ If a friend and the host end up on different versions, joining says so and asks 
 The game switches controls based on what you use: touching the screen shows the joysticks, and using a mouse or keyboard hides them. On small screens the view zooms out and the on-screen info gets smaller.
 
 **Features**
-- Top-down arena with 9 bots and a kill leaderboard
+- Top-down 4800×4800 arena with 16 bots and a kill leaderboard
 - Obstacles: walls, bunkers, crates, and rocks block movement and paintballs. You can hide in bushes.
 - You can take 5 hits and bots can take 3. You respawn after 3 seconds with a short spawn shield.
 - When you splat someone you get a SPLAT! pop-up, a shockwave, screen shake, a banner and a sound. Your hits show a marker on the crosshair.

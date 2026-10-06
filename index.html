@@ -109,7 +109,7 @@
 <script>
 (() => {
   // ---------- Config ----------
-  const WORLD = 2400;
+  const WORLD = 4800;             // arena width and height (4x the area of the original 2400)
   const PLAYER_R = 20;
   const PLAYER_SPEED = 230;
   const SPRINT_MULT = 1.5;
@@ -125,7 +125,7 @@
   const SPREAD = 0.05;
   const RESPAWN_TIME = 3;
   const SPAWN_SHIELD = 3;
-  const NUM_BOTS = 9;
+  const NUM_BOTS = 16;            // more bots for the bigger arena
   const COLORS = ['#ff3d7f', '#3da5ff', '#ffd23d', '#3dff8b', '#b03dff', '#ff8a3d', '#3dfff0', '#ff3d3d', '#9cff3d', '#ffffff'];
   // Power-ups: a splatted player sometimes drops one. Whoever grabs it keeps the boost until they're splatted.
   // Defenses (place: true) go in your item slot instead; place one with E / right-click / the item button
@@ -152,7 +152,8 @@
     dome:   { ttl: 10, r: 75 },
     turret: { ttl: 20, hp: 5, range: 380, rate: 0.5 },
   };
-  const BOT_NAMES = ['Splatty', 'Blobby', 'Drip', 'Smudge', 'Neon', 'Goober', 'Pellet', 'Squish', 'Rainbow', 'Sploosh', 'Zippy', 'Mango'];
+  const BOT_NAMES = ['Splatty', 'Blobby', 'Drip', 'Smudge', 'Neon', 'Goober', 'Pellet', 'Squish', 'Rainbow', 'Sploosh', 'Zippy', 'Mango',
+    'Gloop', 'Speckle', 'Dribble', 'Fizz', 'Noodle', 'Puddle', 'Swirl', 'Bonk'];
 
   const canvas = document.getElementById('c');
   const ctx = canvas.getContext('2d');
@@ -229,31 +230,32 @@
     const R = mulberry32(seed), rr = (a, b) => a + R() * (b - a);
     rects = []; rocks = []; bushes = [];
     const t = 24;
+    const D = (WORLD / 2400) ** 2; // obstacle counts below were tuned for a 2400 arena
     // Long walls
-    for (let i = 0; i < 14; i++) {
+    for (let i = 0; i < 14 * D; i++) {
       const horiz = R() < 0.5;
       const len = rr(180, 420);
       const x = rr(100, WORLD - 100 - len), y = rr(100, WORLD - 100 - len);
       rects.push(horiz ? { x, y, w: len, h: t, kind: 'wall' } : { x, y, w: t, h: len, kind: 'wall' });
     }
     // L-shaped bunkers
-    for (let i = 0; i < 6; i++) {
+    for (let i = 0; i < 6 * D; i++) {
       const x = rr(200, WORLD - 400), y = rr(200, WORLD - 400);
       const a = rr(140, 220), b = rr(140, 220);
       rects.push({ x, y, w: a, h: t, kind: 'wall' });
       rects.push({ x, y, w: t, h: b, kind: 'wall' });
     }
     // Crates
-    for (let i = 0; i < 22; i++) {
+    for (let i = 0; i < 22 * D; i++) {
       const s = rr(44, 70);
       rects.push({ x: rr(80, WORLD - 80 - s), y: rr(80, WORLD - 80 - s), w: s, h: s, kind: 'crate' });
     }
     // Rocks
-    for (let i = 0; i < 18; i++) {
+    for (let i = 0; i < 18 * D; i++) {
       rocks.push({ x: rr(80, WORLD - 80), y: rr(80, WORLD - 80), r: rr(26, 48) });
     }
     // Bushes
-    for (let i = 0; i < 14; i++) {
+    for (let i = 0; i < 14 * D; i++) {
       bushes.push({ x: rr(80, WORLD - 80), y: rr(80, WORLD - 80), r: rr(45, 70) });
     }
   }
@@ -707,7 +709,16 @@
       if (best && best !== b.target) b.reactT = rand(0.5, 0.9); // reaction delay on new target
       b.target = best;
       if (Math.random() < 0.3) b.strafe *= -1;
-      if (!best) b.wanderA += rand(-0.8, 0.8);
+      if (!best) {
+        b.wanderA += rand(-0.8, 0.8);
+        let near = null, nd = 1600 * 1600;
+        for (const o of players) {
+          if (o === b || !o.alive) continue;
+          const d = dist2(b.x, b.y, o.x, o.y);
+          if (d < nd) { near = o; nd = d; }
+        }
+        if (near && Math.random() < 0.35) b.wanderA = Math.atan2(near.y - b.y, near.x - b.x) + rand(-0.6, 0.6);
+      }
     }
 
     let mx = 0, my = 0;
@@ -1050,7 +1061,7 @@
   // Fewer bots as more friends join, so the arena doesn't get too crowded
   function rebalanceBots() {
     const humans = players.filter(p => !p.isBot).length;
-    const want = Math.max(4, NUM_BOTS - (humans - 1));
+    const want = Math.max(8, NUM_BOTS - (humans - 1));
     let bots = players.filter(p => p.isBot);
     while (bots.length > want) {
       const b = bots.pop();
@@ -1397,23 +1408,37 @@
     const sx = shake ? rand(-shake, shake) : 0, sy = shake ? rand(-shake, shake) : 0;
     ctx.translate(-Math.round(camX + sx), -Math.round(camY + sy));
 
+    // With a big arena, skip drawing anything that's off screen
+    const vx0 = camX - 100, vy0 = camY - 100, vx1 = camX + VW + 100, vy1 = camY + VH + 100;
+    const seen = (x, y, w, h) => x + w > vx0 && x < vx1 && y + h > vy0 && y < vy1;
+
     // Ground + grid
     ctx.fillStyle = '#5f9a55'; ctx.fillRect(0, 0, WORLD, WORLD);
     ctx.strokeStyle = 'rgba(0,0,0,.07)'; ctx.lineWidth = 1;
     ctx.beginPath();
-    for (let g = 0; g <= WORLD; g += 80) { ctx.moveTo(g, 0); ctx.lineTo(g, WORLD); ctx.moveTo(0, g); ctx.lineTo(WORLD, g); }
+    for (let g = 0; g <= WORLD; g += 80) {
+      if (g > vx0 && g < vx1) { ctx.moveTo(g, Math.max(0, vy0)); ctx.lineTo(g, Math.min(WORLD, vy1)); }
+      if (g > vy0 && g < vy1) { ctx.moveTo(Math.max(0, vx0), g); ctx.lineTo(Math.min(WORLD, vx1), g); }
+    }
     ctx.stroke();
-    ctx.drawImage(paint, 0, 0, WORLD, WORLD);
+    {
+      // Just the visible part of the paint layer
+      const px = clamp(vx0, 0, WORLD), py = clamp(vy0, 0, WORLD);
+      const pw = clamp(vx1, 0, WORLD) - px, ph = clamp(vy1, 0, WORLD) - py;
+      if (pw > 0 && ph > 0) ctx.drawImage(paint, px * PAINT_SCALE, py * PAINT_SCALE, pw * PAINT_SCALE, ph * PAINT_SCALE, px, py, pw, ph);
+    }
     ctx.strokeStyle = '#2b4427'; ctx.lineWidth = 8; ctx.strokeRect(-4, -4, WORLD + 8, WORLD + 8);
 
     // Obstacles (shadow, then body)
-    for (const r of rects) {
+    const vRects = rects.filter(r => seen(r.x, r.y, r.w + 6, r.h + 6));
+    const vRocks = rocks.filter(o => seen(o.x - o.r, o.y - o.r, o.r * 2 + 6, o.r * 2 + 6));
+    for (const r of vRects) {
       ctx.fillStyle = 'rgba(0,0,0,.25)'; ctx.fillRect(r.x + 6, r.y + 6, r.w, r.h);
     }
-    for (const o of rocks) {
+    for (const o of vRocks) {
       ctx.fillStyle = 'rgba(0,0,0,.25)'; ctx.beginPath(); ctx.arc(o.x + 6, o.y + 6, o.r, 0, Math.PI * 2); ctx.fill();
     }
-    for (const r of rects) {
+    for (const r of vRects) {
       if (r.kind === 'barricade') {
         // Steel wall in the owner's color, cracking as it takes hits
         const d = r.dep, k = d.hp / DEPLOY.wall.hp;
@@ -1440,7 +1465,7 @@
         ctx.fillStyle = '#a9adb8'; ctx.fillRect(r.x, r.y, r.w, Math.min(6, r.h));
       }
     }
-    for (const o of rocks) {
+    for (const o of vRocks) {
       ctx.fillStyle = '#7d7f86'; ctx.beginPath(); ctx.arc(o.x, o.y, o.r, 0, Math.PI * 2); ctx.fill();
       ctx.fillStyle = '#9a9ca4'; ctx.beginPath(); ctx.arc(o.x - o.r * 0.25, o.y - o.r * 0.25, o.r * 0.55, 0, Math.PI * 2); ctx.fill();
     }
@@ -1521,6 +1546,7 @@
 
     // Bushes drawn on top so players hide in them
     for (const b of bushes) {
+      if (!seen(b.x - b.r, b.y - b.r, b.r * 2, b.r * 2)) continue;
       ctx.fillStyle = 'rgba(40, 110, 45, 0.88)';
       ctx.beginPath(); ctx.arc(b.x, b.y, b.r, 0, Math.PI * 2); ctx.fill();
       ctx.fillStyle = 'rgba(70, 150, 70, 0.9)';
