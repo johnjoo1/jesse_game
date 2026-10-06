@@ -1248,13 +1248,15 @@
   const MAX_HUMANS = 8;
   const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
   let peer = null, conns = [], hostConn = null, roomCode = '', mapSeed = 1, nextId = 0;
+  let basePeer = null;   // after an update: the host reclaiming the plain room code for new joiners
+  let roomGen = 0;       // bumps on every host update; the host comes back as CODE-<gen>
   let snapTimer = 0, sendTimer = 0, connecting = false, lastSnap = 0;
   const netMsgEl = document.getElementById('netmsg');
   const netMsg = (t) => { netMsgEl.textContent = t; };
 
   function stopNet() {
-    try { if (peer) peer.destroy(); } catch (e) { /* already closed */ }
-    peer = null; conns = []; hostConn = null; connecting = false;
+    for (const pr of [peer, basePeer]) { try { if (pr) pr.destroy(); } catch (e) { /* already closed */ } }
+    peer = null; basePeer = null; conns = []; hostConn = null; connecting = false;
   }
   function netFail(text) {
     stopNet();
@@ -1268,36 +1270,52 @@
     return false;
   }
 
-  // reopen: after an update the host reclaims the same room code so friends can come back
-  function hostGame(reopen, tries = 0) {
+  // reopen = { code, gen, tries } after an update. The matchmaking service can hold on to the old
+  // room code for up to a minute after a reload, so the host comes back under a fresh address
+  // (CODE-gen) that friends reconnect to right away, and reclaims the plain code in the background
+  // for anyone joining new.
+  function hostGame(reopen) {
     if (connecting) return;
     if (!window.Peer) { if (reopen) addFeed("Couldn't reopen the room, so friends can't rejoin", true); else peerAvailable(); return; }
     connecting = true;
-    let code = reopen || '';
+    let code = reopen ? reopen.code : '';
     if (!reopen) for (let i = 0; i < 4; i++) code += CODE_CHARS[Math.floor(Math.random() * CODE_CHARS.length)];
     if (!reopen) netMsg('Creating a room…');
-    const pr = peer = new Peer(PEER_PREFIX + code);
+    const pr = peer = new Peer(PEER_PREFIX + code + (reopen && reopen.gen ? '-' + reopen.gen : ''));
     const timer = setTimeout(() => { if (peer === pr && !running) netFail(NO_SERVER); }, 12000);
+    const tryAgain = () => {
+      // A reopened room keeps trying (about 2 minutes); a new room just picks another code
+      try { pr.destroy(); } catch (e) { /* already closed */ }
+      peer = null; connecting = false;
+      if (!reopen) { hostGame(); return; }
+      if ((reopen.tries || 0) < 40) setTimeout(() => { if (mode === 'host' && !peer) hostGame({ ...reopen, tries: (reopen.tries || 0) + 1 }); }, 3000);
+      else addFeed("Couldn't reopen the room, so friends can't rejoin", true);
+    };
     pr.on('open', () => {
       clearTimeout(timer);
       if (peer !== pr) return;
       connecting = false;
       roomCode = code;
       if (!reopen) openLobby();
+      else if (reopen.gen) reclaimBase(code, 0);
     });
     pr.on('connection', setupHostConn);
     pr.on('error', err => {
       clearTimeout(timer);
       if (peer !== pr) return;
-      if (err.type === 'unavailable-id') {
-        stopNet();
-        // A new room picks another code; a reopened room waits for the old connection to clear
-        if (!reopen) hostGame();
-        else if (tries < 15) setTimeout(() => { if (mode === 'host') hostGame(reopen, tries + 1); }, 2000);
-        else addFeed("Couldn't reopen the room, so friends can't rejoin", true);
-        return;
-      }
+      if (err.type === 'unavailable-id' || reopen) { tryAgain(); return; }
       if (!running) netFail(NO_SERVER);
+    });
+  }
+  function reclaimBase(code, tries) {
+    if (mode !== 'host' || roomCode !== code || basePeer) return;
+    const bp = basePeer = new Peer(PEER_PREFIX + code);
+    bp.on('connection', setupHostConn);
+    bp.on('error', () => {
+      if (basePeer !== bp) return;
+      try { bp.destroy(); } catch (e) { /* already closed */ }
+      basePeer = null;
+      if (tries < 100) setTimeout(() => reclaimBase(code, tries + 1), 3000); // the old code frees up within a minute or so
     });
   }
 
@@ -1315,7 +1333,7 @@
         // A friend coming back after an update gets their old player (score, boosts, spot) back
         const back = m.rejoin && players.find(p => p.remote && p.id === m.rejoin && p.awayUntil);
         if (back) {
-          back.awayUntil = 0; back.shield = SPAWN_SHIELD; back.inp = null;
+          back.awayUntil = 0; back.shield = SPAWN_SHIELD; back.inp = null; back.useSeen = undefined; back.rlSeen = undefined;
           conn.player = back;
           conn.send({ t: 'welcome', id: back.id, seed: mapSeed, code: roomCode, teams: teamMode });
           fx({ t: 'msg', s: `${back.name} is back` });
@@ -1435,28 +1453,35 @@
     for (const c of conns) if (c.open !== false) { try { c.send(msg); } catch (e) { /* dropped connection */ } }
   }
 
-  // rejoin: { code, id, paint, tries } when coming back after an update
-  function joinGame(rejoin) {
-    if (connecting) return;
-    const code = rejoin ? rejoin.code : document.getElementById('code').value.trim().toUpperCase();
+  // opts: { code, tries } for retries of a normal join, or { code, id, paint, gen, fresh, tries }
+  // when coming back after the host's update
+  function joinGame(opts) {
+    if (connecting || running) return;
+    const back = !!(opts && opts.id);
+    const code = opts && opts.code ? opts.code : document.getElementById('code').value.trim().toUpperCase();
     if (!/^[A-Z]{4}$/.test(code)) { netMsg('Type the 4-letter room code from the host’s screen.'); return; }
     if (!peerAvailable()) return;
     connecting = true;
-    netMsg(rejoin ? `Updated! Rejoining room ${code}…` : 'Joining room ' + code + '…');
+    const tries = (opts && opts.tries) || 0;
+    const maxTries = back ? 45 : 3; // about 90 seconds after an update, a few seconds otherwise
+    netMsg(back ? `Updated! Rejoining room ${code}…${tries ? ` (${tries * 2}s)` : ''}` : tries ? `Looking for room ${code}…` : `Joining room ${code}…`);
+    // After an update the host is at CODE-gen; every third try also checks the plain code
+    const target = PEER_PREFIX + code + (back && opts.gen && tries % 3 !== 2 ? '-' + opts.gen : '');
     const pr = peer = new Peer();
-    const timer = setTimeout(() => { if (peer === pr && !running) netFail(`Couldn't join room ${code}. Check the code, and that the host still has the game open.`); }, rejoin ? 45000 : 15000);
-    // Coming back after an update, the host may still be reloading: keep trying for about 40 seconds
     const retry = () => {
-      if (!rejoin || (rejoin.tries || 0) >= 20) return false;
+      if (tries + 1 >= maxTries) return false;
       clearTimeout(timer);
       stopNet();
-      setTimeout(() => joinGame({ ...rejoin, tries: (rejoin.tries || 0) + 1 }), 2000);
+      setTimeout(() => { if (!running && !peer) joinGame({ ...(opts || {}), code, tries: tries + 1 }); }, 2000);
       return true;
     };
+    const timer = setTimeout(() => {
+      if (peer === pr && !running && !retry()) netFail(`Couldn't join room ${code}. Check the code, and that the host still has the game open.`);
+    }, 15000);
     pr.on('open', () => {
       if (peer !== pr) return;
-      const conn = hostConn = pr.connect(PEER_PREFIX + code, { reliable: true });
-      conn.on('open', () => conn.send({ t: 'hello', name: document.getElementById('name').value.trim() || 'Friend', color: chosen, v: pageVersion, rejoin: rejoin && rejoin.id }));
+      const conn = hostConn = pr.connect(target, { reliable: true });
+      conn.on('open', () => conn.send({ t: 'hello', name: document.getElementById('name').value.trim() || 'Friend', color: chosen, v: pageVersion, rejoin: back ? opts.id : undefined }));
       conn.on('data', m => {
         if (!m || typeof m !== 'object' || peer !== pr) return;
         if (m.t === 'lobby' && !running && Array.isArray(m.people)) {
@@ -1471,14 +1496,23 @@
           roomCode = code;
           lastSnap = performance.now();
           startGame('client', { seed: num(m.seed, 1), id: String(m.id), teams: clamp(num(m.teams), 0, 4) | 0 });
-          if (rejoin && rejoin.paint) restorePaint(rejoin.paint);
+          if (back && opts.paint) restorePaint(opts.paint);
         } else if (m.t === 'update') {
           // The host is updating everyone: save who we are and reload with them
           updating = true;
-          saveState({ f: SAVE_FORMAT, at: Date.now(), mode: 'client', roomCode, myId: me && me.id, name: me && me.name, color: chosen, paint: paintData() });
-          location.reload();
+          saveState({ f: SAVE_FORMAT, at: Date.now(), mode: 'client', roomCode, myId: me && me.id, name: me && me.name, color: chosen,
+            paint: paintData(), gen: num(m.gen) });
+          stopNet();
+          reloadFresh();
         } else if (m.t === 'oldver') {
-          if (!retry()) netFail('You and the host have different versions of the game. Both of you refresh the page, then try again.');
+          // Different versions: fetch a fresh copy of the page (twice at most), then keep trying
+          if (back && (opts.fresh || 0) < 2) {
+            updating = true;
+            saveState({ f: SAVE_FORMAT, at: Date.now(), mode: 'client', roomCode: code, myId: opts.id, name: document.getElementById('name').value,
+              color: chosen, paint: opts.paint, gen: opts.gen, fresh: (opts.fresh || 0) + 1 });
+            stopNet();
+            reloadFresh();
+          } else if (!retry()) netFail('You and the host have different versions of the game. Both of you refresh the page, then try again.');
         } else if (m.t === 'full') {
           clearTimeout(timer);
           netFail('That game is full (8 players).');
@@ -1496,8 +1530,8 @@
     pr.on('error', err => {
       if (peer !== pr) return;
       clearTimeout(timer);
-      if (err.type === 'peer-unavailable' && retry()) return;
-      if (err.type === 'peer-unavailable') netFail(`No game found with code ${code}. Check the code, and that the host still has the game open.`);
+      if (!running && retry()) return;
+      if (err.type === 'peer-unavailable') netFail(`No game found with code ${code}. Check the code. If the host just updated the game, try again in a minute.`);
       else if (!running) netFail(NO_SERVER);
       // Once playing, only a closed connection to the host ends the game (see 'close' above)
     });
@@ -1603,8 +1637,9 @@
     updating = true;
     updateBtn.textContent = 'Updating…';
     if (running && mode === 'host') {
-      for (const c of conns) { try { c.send({ t: 'update' }); } catch (e) { /* dropped connection */ } }
-      setTimeout(saveAndReload, 400); // give friends a moment to hear it
+      roomGen++;
+      for (const c of conns) { try { c.send({ t: 'update', gen: roomGen }); } catch (e) { /* dropped connection */ } }
+      setTimeout(saveAndReload, 500); // give friends a moment to hear it
     } else saveAndReload();
   };
 
@@ -1628,14 +1663,21 @@
     'ammo', 'reload', 'cooldown', 'stamina', 'alive', 'respawn', 'shield', 'kills', 'deaths', 'streak', 'wanderA', 'strafe'];
   function serializeGame() {
     return {
-      f: SAVE_FORMAT, at: Date.now(), mode, roomCode, mapSeed, nextId, dropId, myId: me.id, camX, camY, teamMode, totalPlayers, botNames,
+      f: SAVE_FORMAT, at: Date.now(), mode, roomCode, roomGen, mapSeed, nextId, dropId, myId: me.id, camX, camY, teamMode, totalPlayers, botNames,
       players: players.map(p => Object.fromEntries(SAVED_FIELDS.map(k => [k, p[k]]))),
       drops, deploys, deployId, feed, alliances, requests, paint: paintData(),
     };
   }
   function saveAndReload() {
     if (running && me) saveState(serializeGame());
-    location.reload();
+    stopNet(); // let go of the room code right away so it's free again sooner
+    reloadFresh();
+  }
+  // A one-off address skips any cached copy of the page, so everyone lands on the newest version
+  function reloadFresh() {
+    const u = new URL(location.href);
+    u.searchParams.set('fresh', Date.now().toString(36));
+    location.replace(u.toString());
   }
 
   function restoreGame(sv) {
@@ -1644,7 +1686,7 @@
       if (sv.name) document.getElementById('name').value = sv.name;
       if (sv.mode === 'client') {
         if (COLORS.includes(sv.color)) chosen = sv.color;
-        joinGame({ code: sv.roomCode, id: sv.myId, paint: sv.paint, tries: 0 });
+        joinGame({ code: sv.roomCode, id: sv.myId, paint: sv.paint, gen: sv.gen || 0, fresh: sv.fresh || 0, tries: 0 });
         return true;
       }
       const restored = sv.players.map(o => Object.assign(makePlayer(o.name, o.color, o.isBot, o.id), o));
@@ -1669,10 +1711,11 @@
       document.getElementById('menu').style.display = 'none';
       running = true;
       if (mode === 'host') {
-        // Friends are reloading too; keep their players safe and waiting for 30 seconds
         roomCode = sv.roomCode;
-        for (const p of players) if (p.remote) { p.awayUntil = performance.now() + 30000; p.shield = 30; p.inp = null; }
-        hostGame(roomCode);
+        // Friends are reloading too; keep their players safe and waiting for 90 seconds
+        for (const p of players) if (p.remote) { p.awayUntil = performance.now() + 90000; p.shield = 90; p.inp = null; }
+        roomGen = sv.roomGen || 0;
+        hostGame({ code: roomCode, gen: roomGen, tries: 0 });
       }
       addFeed('Updated! Your game was saved.', true);
       return true;
@@ -2476,6 +2519,7 @@
   setTouchMode(window.matchMedia('(pointer: coarse)').matches);
   requestAnimationFrame(frame);
 
+  if (new URL(location.href).searchParams.has('fresh')) history.replaceState(null, '', location.pathname + location.hash);
   fetchVersion().then(v => { pageVersion = v; if (v) setInterval(checkForUpdate, 90000); }).catch(() => {});
 
   function boot(data) {
