@@ -6,7 +6,25 @@
 <title>Paintball Wars</title>
 <style>
   html, body { margin: 0; height: 100%; overflow: hidden; background: #1d2b1f; font-family: system-ui, sans-serif; }
-  canvas { display: block; cursor: crosshair; }
+  canvas { display: block; cursor: crosshair; touch-action: none; }
+  body { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+  #menu input { -webkit-user-select: text; user-select: text; }
+  .touch-only, #rotate { display: none; }
+  body.touch .touch-only { display: block; }
+  body.touch .desk-only { display: none; }
+  @media (orientation: portrait) { body.touch #rotate { display: block; } }
+  #rotate { margin-top: 12px; font-size: 13px; font-weight: 700; color: #b8336a; }
+  #menu { overflow-y: auto; }
+  @media (max-height: 480px) {
+    #menu .card { padding: 16px 24px; }
+    #menu h1 { font-size: 24px; }
+    #menu p { display: none; }
+    #menu input { font-size: 16px; padding: 8px 10px; margin-bottom: 10px; }
+    #colors { margin-bottom: 12px; }
+    #colors button { width: 28px; height: 28px; }
+    #play { padding: 10px; font-size: 18px; }
+    #menu .keys { margin-top: 10px; }
+  }
   #menu {
     position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
     background: rgba(10, 20, 12, 0.75);
@@ -42,10 +60,15 @@
     <input id="name" maxlength="14" placeholder="Your name" value="">
     <div id="colors"></div>
     <button id="play">PLAY</button>
-    <div class="keys">
+    <div class="keys desk-only">
       <b>WASD</b> move &nbsp;·&nbsp; <b>Mouse</b> aim &nbsp;·&nbsp; <b>Click</b> shoot<br>
       <b>R</b> reload &nbsp;·&nbsp; <b>Shift</b> sprint
     </div>
+    <div class="keys touch-only">
+      <b>Left thumb</b> move &nbsp;·&nbsp; <b>Right thumb</b> aim + shoot<br>
+      Tap <b>⟳</b> to reload &nbsp;·&nbsp; <b>»</b> to sprint
+    </div>
+    <div id="rotate">Turn your phone sideways for the best view</div>
   </div>
 </div>
 <script>
@@ -74,9 +97,12 @@
   const canvas = document.getElementById('c');
   const ctx = canvas.getContext('2d');
   let W = 0, H = 0, DPR = 1;
+  let zoom = 1, VW = 0, VH = 0;   // VW/VH: how much of the world fits on screen
   function resize() {
     DPR = window.devicePixelRatio || 1;
     W = window.innerWidth; H = window.innerHeight;
+    zoom = Math.max(0.6, Math.min(1, Math.min(W, H) / 750));
+    VW = W / zoom; VH = H / zoom;
     canvas.width = W * DPR; canvas.height = H * DPR;
     canvas.style.width = W + 'px'; canvas.style.height = H + 'px';
   }
@@ -347,15 +373,81 @@
   // ---------- Input ----------
   const keys = {};
   let mouseX = 0, mouseY = 0, mouseDown = false;
+
+  // Input mode is detected from what the player actually uses, so touch laptops
+  // and tablets with keyboards work: a touch switches to joysticks, a mouse or key switches back.
+  let touchMode = false;
+  function setTouchMode(on) {
+    if (touchMode === on) return;
+    touchMode = on;
+    document.body.classList.toggle('touch', on);
+    if (!on) { sticks.move = sticks.aim = null; sprintOn = false; }
+  }
+
+  // Touch controls: floating twin sticks (left half moves, right half aims + fires) and two buttons
+  const STICK_R = 60;
+  const sticks = { move: null, aim: null };
+  let sprintOn = false;
+  function touchButtons() {
+    return {
+      reload: { x: W - 60, y: H - 205, r: 30, label: '⟳' },
+      sprint: { x: W - 140, y: H - 205, r: 30, label: '»' },
+    };
+  }
+  function touchDown(id, x, y) {
+    if (!running || !me || !me.alive) return;
+    const btn = touchButtons();
+    if (dist2(x, y, btn.reload.x, btn.reload.y) < (btn.reload.r + 10) ** 2) { startReload(me); return; }
+    if (dist2(x, y, btn.sprint.x, btn.sprint.y) < (btn.sprint.r + 10) ** 2) { sprintOn = !sprintOn; return; }
+    const st = { id, bx: x, by: y, x, y };
+    if (x < W / 2) { if (!sticks.move) sticks.move = st; }
+    else if (!sticks.aim) sticks.aim = st;
+  }
+  function touchMove(id, x, y) {
+    for (const k of ['move', 'aim']) if (sticks[k] && sticks[k].id === id) { sticks[k].x = x; sticks[k].y = y; }
+  }
+  function touchUp(id) {
+    for (const k of ['move', 'aim']) if (sticks[k] && sticks[k].id === id) sticks[k] = null;
+  }
+  function stickVec(st) {
+    if (!st) return { x: 0, y: 0, len: 0 };
+    let dx = st.x - st.bx, dy = st.y - st.by;
+    const d = Math.hypot(dx, dy);
+    if (d > STICK_R) { dx = dx / d * STICK_R; dy = dy / d * STICK_R; }
+    return { x: dx / STICK_R, y: dy / STICK_R, len: Math.min(d, STICK_R) / STICK_R };
+  }
+
+  canvas.addEventListener('pointerdown', e => {
+    if (e.pointerType === 'mouse') {
+      setTouchMode(false);
+      mouseX = e.clientX; mouseY = e.clientY;
+      if (e.button === 0) mouseDown = true;
+      return;
+    }
+    e.preventDefault();
+    setTouchMode(true);
+    touchDown(e.pointerId, e.clientX, e.clientY);
+  });
+  canvas.addEventListener('pointermove', e => {
+    if (e.pointerType === 'mouse') { setTouchMode(false); mouseX = e.clientX; mouseY = e.clientY; return; }
+    e.preventDefault();
+    touchMove(e.pointerId, e.clientX, e.clientY);
+  });
+  window.addEventListener('pointerup', e => {
+    if (e.pointerType === 'mouse') { if (e.button === 0) mouseDown = false; return; }
+    touchUp(e.pointerId);
+  });
+  window.addEventListener('pointercancel', e => touchUp(e.pointerId));
+  window.addEventListener('touchstart', () => setTouchMode(true), { passive: true });
+
   window.addEventListener('keydown', e => {
+    if (document.activeElement && document.activeElement.tagName === 'INPUT') return;
+    setTouchMode(false);
     keys[e.code] = true;
     if (e.code === 'KeyR' && me && me.alive) startReload(me);
   });
   window.addEventListener('keyup', e => { keys[e.code] = false; });
-  canvas.addEventListener('mousemove', e => { mouseX = e.clientX; mouseY = e.clientY; });
-  canvas.addEventListener('mousedown', e => { if (e.button === 0) mouseDown = true; });
-  window.addEventListener('mouseup', e => { if (e.button === 0) mouseDown = false; });
-  window.addEventListener('blur', () => { for (const k in keys) keys[k] = false; mouseDown = false; });
+  window.addEventListener('blur', () => { for (const k in keys) keys[k] = false; mouseDown = false; sticks.move = sticks.aim = null; });
 
   // ---------- Bot AI ----------
   function botThink(b, dt) {
@@ -407,6 +499,19 @@
     return { mx: mx / ml, my: my / ml, sprint: !!t && b.hp === 1 };
   }
 
+  // Thumbs are less precise than a mouse: nudge touch aim onto a nearby visible enemy
+  function aimAssist(p, a) {
+    let best = a, bestDiff = 0.3;
+    for (const o of players) {
+      if (o === p || !o.alive || dist2(p.x, p.y, o.x, o.y) > 600 * 600) continue;
+      if (inBush(o) && dist2(p.x, p.y, o.x, o.y) > 110 * 110) continue;
+      const oa = Math.atan2(o.y - p.y, o.x - p.x);
+      const diff = Math.abs(Math.atan2(Math.sin(oa - a), Math.cos(oa - a)));
+      if (diff < bestDiff && lineOfSight(p.x, p.y, o.x, o.y)) { best = oa; bestDiff = diff; }
+    }
+    return best;
+  }
+
   // ---------- Update ----------
   function movePlayer(p, mx, my, sprint, dt) {
     let speed = PLAYER_SPEED;
@@ -433,11 +538,19 @@
       p.hitFlash = Math.max(0, p.hitFlash - dt);
       if (p.reload > 0) { p.reload -= dt; if (p.reload <= 0) { p.reload = 0; p.ammo = MAG_SIZE; } }
 
-      if (p === me) {
+      if (p === me && touchMode) {
+        const mv = stickVec(sticks.move), av = stickVec(sticks.aim);
+        const go = mv.len > 0.15;
+        if (av.len > 0.15) p.aim = aimAssist(p, Math.atan2(av.y, av.x));
+        else if (go) p.aim = Math.atan2(mv.y, mv.x);
+        if (p.stamina <= 0) sprintOn = false;
+        movePlayer(p, go ? mv.x : 0, go ? mv.y : 0, sprintOn, dt);
+        if (av.len > 0.35) shoot(p);
+      } else if (p === me) {
         let mx = (keys.KeyD || keys.ArrowRight ? 1 : 0) - (keys.KeyA || keys.ArrowLeft ? 1 : 0);
         let my = (keys.KeyS || keys.ArrowDown ? 1 : 0) - (keys.KeyW || keys.ArrowUp ? 1 : 0);
         const l = Math.hypot(mx, my) || 1;
-        p.aim = Math.atan2(mouseY + camY - p.y, mouseX + camX - p.x);
+        p.aim = Math.atan2(mouseY / zoom + camY - p.y, mouseX / zoom + camX - p.x);
         movePlayer(p, mx / l, my / l, keys.ShiftLeft || keys.ShiftRight, dt);
         if (mouseDown) shoot(p);
       } else {
@@ -564,14 +677,15 @@
   function render() {
     ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
     if (me) {
-      const tx = me.x - W / 2, ty = me.y - H / 2;
+      const tx = me.x - VW / 2, ty = me.y - VH / 2;
       camX += (tx - camX) * 0.2; camY += (ty - camY) * 0.2;
     }
     // Keep the camera inside the arena so the empty area past the edge never fills the screen
-    camX = W >= WORLD ? (WORLD - W) / 2 : clamp(camX, 0, WORLD - W);
-    camY = H >= WORLD ? (WORLD - H) / 2 : clamp(camY, 0, WORLD - H);
+    camX = VW >= WORLD ? (WORLD - VW) / 2 : clamp(camX, 0, WORLD - VW);
+    camY = VH >= WORLD ? (WORLD - VH) / 2 : clamp(camY, 0, WORLD - VH);
     ctx.fillStyle = '#152017'; ctx.fillRect(0, 0, W, H);
     ctx.save();
+    ctx.scale(zoom, zoom);
     const sx = shake ? rand(-shake, shake) : 0, sy = shake ? rand(-shake, shake) : 0;
     ctx.translate(-Math.round(camX + sx), -Math.round(camY + sy));
 
@@ -652,6 +766,14 @@
       ctx.fillStyle = '#ffe066'; ctx.fillText(q.text, 0, 0);
       ctx.restore();
     }
+    // Touch aim line, so you can see where the right thumb is pointing
+    if (touchMode && me && me.alive && stickVec(sticks.aim).len > 0.15) {
+      ctx.strokeStyle = 'rgba(255,255,255,.55)'; ctx.lineWidth = 3; ctx.setLineDash([10, 10]);
+      ctx.beginPath();
+      ctx.moveTo(me.x + Math.cos(me.aim) * 40, me.y + Math.sin(me.aim) * 40);
+      ctx.lineTo(me.x + Math.cos(me.aim) * 220, me.y + Math.sin(me.aim) * 220);
+      ctx.stroke(); ctx.setLineDash([]);
+    }
     ctx.globalAlpha = 1;
     ctx.restore();
 
@@ -659,9 +781,10 @@
   }
 
   function drawHUD() {
+    const compact = W < 700 || H < 500;
     // Leaderboard
     const sorted = [...players].sort((a, b) => b.kills - a.kills || a.deaths - b.deaths);
-    const lbW = 190, rowH = 20, top = 5;
+    const lbW = compact ? 150 : 190, rowH = 20, top = compact ? 3 : 5;
     ctx.fillStyle = 'rgba(0,0,0,.45)';
     ctx.fillRect(W - lbW - 12, 12, lbW, 30 + rowH * Math.min(top, sorted.length) + (sorted.indexOf(me) >= top ? rowH : 0));
     ctx.font = 'bold 14px system-ui'; ctx.textAlign = 'left'; ctx.fillStyle = '#fff';
@@ -682,25 +805,29 @@
       ctx.fillText(p.kills, W - 22, y);
     });
 
-    // Kill feed
-    ctx.textAlign = 'left'; ctx.font = 'bold 14px system-ui';
-    feed.forEach((f, i) => {
+    // Minimap (bottom-left with a mouse; top-left on touch, where the move stick isn't)
+    const mm = compact ? 96 : 150, mx0 = 12, my0 = touchMode ? 12 : H - mm - 12;
+
+    // Kill feed (moves right of the minimap on touch)
+    const fx = touchMode ? mx0 + mm + 12 : 12;
+    ctx.textAlign = 'left'; ctx.font = compact ? 'bold 12px system-ui' : 'bold 14px system-ui';
+    feed.slice(0, compact ? 3 : 5).forEach((f, i) => {
       ctx.globalAlpha = clamp(f.t, 0, 1);
       ctx.fillStyle = 'rgba(0,0,0,.45)';
       const w = ctx.measureText(f.msg).width + 16;
-      ctx.fillRect(12, 12 + i * 26, w, 22);
+      ctx.fillRect(fx, 12 + i * 26, w, 22);
       ctx.fillStyle = f.mine ? '#ffe066' : '#fff';
-      ctx.fillText(f.msg, 20, 28 + i * 26);
+      ctx.fillText(f.msg, fx + 8, 28 + i * 26);
     });
     ctx.globalAlpha = 1;
 
     // Ammo / HP / stamina (bottom center)
     if (me.alive) {
-      const cx = W / 2, by = H - 30;
+      const cx = W / 2, by = H - 30, gap = compact ? 12 : 16;
       ctx.textAlign = 'center';
       for (let i = 0; i < MAG_SIZE; i++) {
         ctx.fillStyle = i < me.ammo ? me.color : 'rgba(0,0,0,.4)';
-        ctx.beginPath(); ctx.arc(cx + (i - (MAG_SIZE - 1) / 2) * 16, by, 6, 0, Math.PI * 2); ctx.fill();
+        ctx.beginPath(); ctx.arc(cx + (i - (MAG_SIZE - 1) / 2) * gap, by, compact ? 5 : 6, 0, Math.PI * 2); ctx.fill();
       }
       if (me.reload > 0) {
         const w = 200, pr = 1 - me.reload / RELOAD_TIME;
@@ -715,7 +842,7 @@
     }
 
     // Minimap
-    const mm = 150, mx0 = 12, my0 = H - mm - 12, s = mm / WORLD;
+    const s = mm / WORLD;
     ctx.fillStyle = 'rgba(0,0,0,.45)'; ctx.fillRect(mx0, my0, mm, mm);
     ctx.fillStyle = 'rgba(200,200,210,.6)';
     for (const r of rects) ctx.fillRect(mx0 + r.x * s, my0 + r.y * s, Math.max(1, r.w * s), Math.max(1, r.h * s));
@@ -725,24 +852,30 @@
       ctx.beginPath(); ctx.arc(mx0 + me.x * s, my0 + me.y * s, 4, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
     }
 
-    // Stats
-    ctx.textAlign = 'right'; ctx.font = 'bold 14px system-ui'; ctx.fillStyle = '#fff';
-    ctx.fillText(`Splats: ${me.kills}   Deaths: ${me.deaths}`, W - 14, H - 16);
+    // Stats (on touch the aim stick lives in this corner)
+    if (!touchMode) {
+      ctx.textAlign = 'right'; ctx.font = 'bold 14px system-ui'; ctx.fillStyle = '#fff';
+      ctx.fillText(`Splats: ${me.kills}   Deaths: ${me.deaths}`, W - 14, H - 16);
+    }
 
-    // Hit marker at the crosshair
+    // Hit marker at the crosshair (on touch: out along the aim line)
     if (hitMarker > 0 && me.alive) {
+      const hx = touchMode ? (me.x + Math.cos(me.aim) * 160 - camX) * zoom : mouseX;
+      const hy = touchMode ? (me.y + Math.sin(me.aim) * 160 - camY) * zoom : mouseY;
       ctx.strokeStyle = '#fff'; ctx.lineWidth = 3; ctx.globalAlpha = clamp(hitMarker * 6, 0, 1);
       const a = 6, b = 14;
       ctx.beginPath();
-      for (const [dx, dy] of [[1, 1], [1, -1], [-1, 1], [-1, -1]]) { ctx.moveTo(mouseX + dx * a, mouseY + dy * a); ctx.lineTo(mouseX + dx * b, mouseY + dy * b); }
+      for (const [dx, dy] of [[1, 1], [1, -1], [-1, 1], [-1, -1]]) { ctx.moveTo(hx + dx * a, hy + dy * a); ctx.lineTo(hx + dx * b, hy + dy * b); }
       ctx.stroke(); ctx.globalAlpha = 1;
     }
+
+    if (touchMode && me.alive) drawTouchControls();
 
     // "You splatted X!" banner
     if (banner) {
       ctx.globalAlpha = clamp(banner.t * 2, 0, 1);
       ctx.textAlign = 'center';
-      ctx.font = '900 30px system-ui';
+      ctx.font = compact ? '900 22px system-ui' : '900 30px system-ui';
       ctx.lineWidth = 6; ctx.strokeStyle = 'rgba(0,0,0,.7)';
       ctx.strokeText(banner.text, W / 2, 110); ctx.fillStyle = me.color; ctx.fillText(banner.text, W / 2, 110);
       if (banner.sub) {
@@ -752,6 +885,15 @@
       ctx.globalAlpha = 1;
     }
 
+    // Phone held upright: suggest turning it
+    if (touchMode && H > W) {
+      ctx.textAlign = 'center'; ctx.font = 'bold 14px system-ui';
+      const msg = 'Turn your phone sideways for the best view';
+      const w = ctx.measureText(msg).width + 20;
+      ctx.fillStyle = 'rgba(0,0,0,.6)'; ctx.fillRect(W / 2 - w / 2, H / 2 - 120, w, 28);
+      ctx.fillStyle = '#fff'; ctx.fillText(msg, W / 2, H / 2 - 101);
+    }
+
     // Death screen
     if (!me.alive) {
       ctx.fillStyle = 'rgba(0,0,0,.45)'; ctx.fillRect(0, 0, W, H);
@@ -759,6 +901,37 @@
       ctx.font = 'bold 44px system-ui'; ctx.fillText('SPLATTED!', W / 2, H / 2 - 20);
       ctx.font = '20px system-ui';
       if (me.respawn > 0) ctx.fillText(`Respawning in ${Math.ceil(me.respawn)}...`, W / 2, H / 2 + 20);
+    }
+  }
+
+  function drawTouchControls() {
+    const drawStick = (st, hx, hy, label) => {
+      const bx = st ? st.bx : hx, by = st ? st.by : hy;
+      ctx.globalAlpha = st ? 0.9 : 0.35;
+      ctx.fillStyle = 'rgba(0,0,0,.3)'; ctx.strokeStyle = 'rgba(255,255,255,.7)'; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.arc(bx, by, STICK_R, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+      const v = stickVec(st);
+      ctx.fillStyle = 'rgba(255,255,255,.85)';
+      ctx.beginPath(); ctx.arc(bx + v.x * STICK_R, by + v.y * STICK_R, 26, 0, Math.PI * 2); ctx.fill();
+      if (!st) {
+        ctx.fillStyle = '#fff'; ctx.font = 'bold 12px system-ui'; ctx.textAlign = 'center';
+        ctx.fillText(label, bx, by - STICK_R - 8);
+      }
+      ctx.globalAlpha = 1;
+    };
+    drawStick(sticks.move, 100, H - 100, 'MOVE');
+    drawStick(sticks.aim, W - 100, H - 95, 'AIM + SHOOT');
+
+    const btn = touchButtons();
+    for (const k of ['reload', 'sprint']) {
+      const b = btn[k];
+      const active = (k === 'sprint' && sprintOn) || (k === 'reload' && me.reload > 0);
+      ctx.fillStyle = active ? me.color : 'rgba(0,0,0,.4)';
+      ctx.strokeStyle = 'rgba(255,255,255,.8)'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(b.x, b.y, b.r, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = '#fff'; ctx.font = 'bold 24px system-ui'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText(b.label, b.x, b.y + 1);
+      ctx.textBaseline = 'alphabetic';
     }
   }
 
@@ -795,7 +968,9 @@
     const names = [...BOT_NAMES].sort(() => Math.random() - 0.5);
     for (let i = 0; i < NUM_BOTS; i++) players.push(makePlayer(names[i], botColors[i % botColors.length], true));
     for (const p of players) spawn(p);
-    camX = me.x - W / 2; camY = me.y - H / 2;
+    camX = me.x - VW / 2; camY = me.y - VH / 2;
+    sticks.move = sticks.aim = null; sprintOn = false;
+    try { audio = audio || new (window.AudioContext || window.webkitAudioContext)(); audio.resume(); } catch (e) { /* no sound */ }
     document.getElementById('menu').style.display = 'none';
     running = true;
   }
@@ -804,7 +979,8 @@
 
   // Idle background behind the menu
   buildMap();
-  camX = WORLD / 2 - W / 2; camY = WORLD / 2 - H / 2;
+  camX = WORLD / 2 - VW / 2; camY = WORLD / 2 - VH / 2;
+  setTouchMode(window.matchMedia('(pointer: coarse)').matches);
   requestAnimationFrame(frame);
 })();
 </script>

@@ -4,7 +4,11 @@ A browser prototype inspired by boomerangwar.io, using paintball guns instead of
 
 Open `index.html` in a browser. Nothing needs to be installed.
 
-**Controls:** WASD/arrows move · mouse aim · click shoot · R reload · Shift sprint
+**Controls**
+- Computer: WASD/arrows move · mouse aim · click shoot · R reload · Shift sprint
+- Phone/tablet: left thumb moves, right thumb aims and shoots (with a little aim assist), ⟳ reloads, » toggles sprint
+
+The game switches controls based on what you use: touching the screen shows the joysticks, and using a mouse or keyboard hides them. On small screens the view zooms out and the on-screen info gets smaller.
 
 **Features**
 - Top-down arena with 9 bots and a kill leaderboard
