@@ -141,16 +141,18 @@
     triple: { w: 9,  name: 'Triple Shot',   icon: '⁂', color: '#ff8a3d', desc: 'Every shot fires 3 paintballs' },
     golden: { w: 3,  name: 'Golden Gun',    icon: '★', color: '#ffc800', desc: 'Every hit counts double' },
     // Defenses: blue-green family so they read as "protect" from across the map
-    wall:   { w: 12, place: true, name: 'Barricade',     icon: '▮', color: '#a0b4c8', desc: 'A wall that blocks paintballs (8 hits, 40s)' },
+    wall:   { w: 12, place: true, name: 'Barricade',     icon: '▮', color: '#a0b4c8', desc: 'A wall that blocks paintballs until it takes 8 hits' },
     heal:   { w: 9,  place: true, name: 'Heal Station',  icon: '✚', color: '#3dff8b', desc: 'Stand in it to heal (20s)' },
     dome:   { w: 7,  place: true, name: 'Shield Dome',   icon: '◠', color: '#7fd4ff', desc: "Enemy paint can't get in (10s)" },
-    turret: { w: 6,  place: true, name: 'Sentry Turret', icon: '⊕', color: '#c78bff', desc: 'Shoots enemies near it (5 hits, 20s)' },
+    turret: { w: 6,  place: true, name: 'Sentry Turret', icon: '⊕', color: '#c78bff', desc: 'Shoots enemies near it until it takes 5 hits' },
   };
+  const MAX_LASTING = 3;         // barricades + turrets one player can have standing; a 4th replaces their oldest
   const DEPLOY = {
-    wall:   { ttl: 40, hp: 8 },
+    // ttl 0 = no timer: things enemies can shoot down stay until they do
+    wall:   { ttl: 0, hp: 8 },
     heal:   { ttl: 20, r: 60 },
     dome:   { ttl: 10, r: 75 },
-    turret: { ttl: 20, hp: 5, range: 380, rate: 0.5 },
+    turret: { ttl: 0, hp: 5, range: 380, rate: 0.5 },
   };
   const BOT_NAMES = ['Splatty', 'Blobby', 'Drip', 'Smudge', 'Neon', 'Goober', 'Pellet', 'Squish', 'Rainbow', 'Sploosh', 'Zippy', 'Mango',
     'Gloop', 'Speckle', 'Dribble', 'Fizz', 'Noodle', 'Puddle', 'Swirl', 'Bonk'];
@@ -479,7 +481,8 @@
     const type = p.item, cfg = DEPLOY[type];
     p.item = null;
     const ca = Math.cos(p.aim), sa = Math.sin(p.aim);
-    const d = { id: ++deployId, type, owner: p.id, color: p.color, ttl: cfg.ttl, hp: cfg.hp || 0, x: p.x, y: p.y, aim: p.aim, cool: 0 };
+    const d = { id: ++deployId, type, owner: p.id, color: p.color, ttl: cfg.ttl, hp: cfg.hp || 0, x: p.x, y: p.y, aim: p.aim, cool: 0,
+      alive: true, vx: 0, vy: 0 }; // alive/vx/vy let bots target a turret like a player
     if (type === 'wall') {
       // Stands across your line of fire, a step in front of you
       d.x = p.x + ca * 50; d.y = p.y + sa * 50;
@@ -490,18 +493,29 @@
     }
     d.x = clamp(d.x, 20, WORLD - 20); d.y = clamp(d.y, 20, WORLD - 20);
     deploys.push(d);
+    if (!cfg.ttl) {
+      // Lasting defenses never time out, so cap how many each player can have up at once
+      const mine = deploys.filter(q => q.owner === p.id && !DEPLOY[q.type].ttl);
+      if (mine.length > MAX_LASTING) removeDeploy(mine[0], true);
+    }
     if (type === 'wall') rebuildRects();
     fx({ t: 'dep', k: type, p: p.id, x: d.x, y: d.y });
   }
   function removeDeploy(d, broke) {
+    d.alive = false;
     deploys = deploys.filter(q => q !== d);
     if (d.type === 'wall') rebuildRects();
     if (broke) fx({ t: 'bu', x: d.x, y: d.y, c: POWERUPS[d.type].color, n: 24, v: 260 });
   }
+  // When a player leaves (or a bot is removed), their defenses go with them
+  function removeDeploysOf(id) {
+    for (const d of deploys.filter(q => q.owner === id)) removeDeploy(d, true);
+  }
   function updateDeploys(dt) {
     for (const d of deploys.slice()) {
-      d.ttl -= dt;
-      if (d.ttl <= 0 || (DEPLOY[d.type].hp && d.hp <= 0)) { removeDeploy(d, d.ttl > 0); continue; }
+      const timed = DEPLOY[d.type].ttl > 0;
+      if (timed) d.ttl -= dt;
+      if ((timed && d.ttl <= 0) || (DEPLOY[d.type].hp && d.hp <= 0)) { removeDeploy(d, !timed || d.ttl > 0); continue; }
       const owner = players.find(q => q.id === d.owner);
       if (d.type === 'heal' && owner && owner.alive && dist2(owner.x, owner.y, d.x, d.y) < DEPLOY.heal.r ** 2) {
         owner.healT += dt;
@@ -706,6 +720,12 @@
         if (!lineOfSight(b.x, b.y, o.x, o.y, b.id)) continue;
         best = o; bestD = d;
       }
+      // Enemy turrets are fair game too (otherwise they'd never come down)
+      for (const t of deploys) {
+        if (t.type !== 'turret' || t.owner === b.id) continue;
+        const d = dist2(b.x, b.y, t.x, t.y);
+        if (d < bestD && lineOfSight(b.x, b.y, t.x, t.y, b.id)) { best = t; bestD = d; }
+      }
       if (best && best !== b.target) b.reactT = rand(0.5, 0.9); // reaction delay on new target
       b.target = best;
       if (Math.random() < 0.3) b.strafe *= -1;
@@ -822,6 +842,7 @@
       const now = performance.now();
       for (const p of players.filter(q => q.awayUntil && now > q.awayUntil)) {
         players = players.filter(q => q !== p);
+        removeDeploysOf(p.id);
         fx({ t: 'msg', s: `${p.name} left the game` });
         rebalanceBots();
       }
@@ -1053,6 +1074,7 @@
     if (conn.player && mode === 'host' && !updating) { // during an update, friends drop off on purpose
       conn.player.alive = false;
       players = players.filter(p => p !== conn.player);
+      removeDeploysOf(conn.player.id);
       fx({ t: 'msg', s: `${conn.player.name} left the game` });
       rebalanceBots();
     }
@@ -1067,6 +1089,7 @@
       const b = bots.pop();
       b.alive = false;
       players = players.filter(p => p !== b);
+      removeDeploysOf(b.id);
     }
     const used = new Set(players.map(p => p.name));
     while (bots.length < want) {
@@ -1198,7 +1221,7 @@
     }
     for (const b of balls) { b.x += b.vx * dt; b.y += b.vy * dt; }
     for (const d of drops) d.ttl -= dt;
-    for (const d of deploys) d.ttl -= dt;
+    for (const d of deploys) if (DEPLOY[d.type].ttl) d.ttl -= dt;
     sendTimer -= dt;
     if (sendTimer <= 0 && hostConn && hostConn.open) {
       sendTimer = 1 / 30;
@@ -1442,7 +1465,7 @@
       if (r.kind === 'barricade') {
         // Steel wall in the owner's color, cracking as it takes hits
         const d = r.dep, k = d.hp / DEPLOY.wall.hp;
-        if (d.ttl < 4 && Math.floor(d.ttl * 6) % 2 === 0) ctx.globalAlpha = 0.5;
+
         ctx.fillStyle = '#5d6b7a'; ctx.fillRect(r.x, r.y, r.w, r.h);
         ctx.fillStyle = d.color; ctx.globalAlpha *= 0.55;
         if (r.w > r.h) ctx.fillRect(r.x, r.y + r.h / 2 - 3, r.w, 6); else ctx.fillRect(r.x + r.w / 2 - 3, r.y, 6, r.h);
@@ -1492,7 +1515,7 @@
 
     // Heal stations and turrets sit on the ground under players
     for (const d of deploys) {
-      const fading = d.ttl < 4 && Math.floor(d.ttl * 6) % 2 === 0;
+      const fading = DEPLOY[d.type].ttl > 0 && d.ttl < 4 && Math.floor(d.ttl * 6) % 2 === 0;
       ctx.save();
       ctx.globalAlpha = fading ? 0.4 : 1;
       if (d.type === 'heal') {

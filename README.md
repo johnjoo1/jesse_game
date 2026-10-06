@@ -23,14 +23,16 @@ Bots grab them too, and unclaimed drops fade after 20 seconds.
 | ★ Golden Gun | 3% | Every hit counts double |
 
 **Defenses** go in your item slot (one at a time). Place one with **E** or right-click
-(or the item button on a phone) and it stays put until its timer runs out or it's destroyed:
+(or the item button on a phone). It stays where you put it. Defenses that can be shot down have no timer:
+they last until enemies destroy them (bots go after enemy turrets). Each player can have up to 3 of
+these standing; placing a 4th removes their oldest. The others run on a timer:
 
 | Defense | Chance | What it does |
 |---|---|---|
-| ▮ Barricade | 12% | A wall across your line of fire. Blocks enemy paint, but yours flies through it. Breaks after 8 hits; lasts 40s |
+| ▮ Barricade | 12% | A wall across your line of fire. Blocks enemy paint, but yours flies through it. Stays until it takes 8 hits |
 | ✚ Heal Station | 9% | Stand in it to heal 1 health every 1.5s. Lasts 20s |
 | ◠ Shield Dome | 7% | Enemy paint can't get in; you can shoot out. Lasts 10s |
-| ⊕ Sentry Turret | 6% | Shoots enemies within range; its splats count for you. Breaks after 5 hits; lasts 20s |
+| ⊕ Sentry Turret | 6% | Shoots enemies within range; its splats count for you. Stays until it takes 5 hits |
 
 Chances are per drop, so a Golden Gun turns up about once every 67 splats.
 
