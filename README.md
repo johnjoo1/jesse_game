@@ -22,8 +22,10 @@ Bots grab them too, and unclaimed drops fade after 20 seconds.
 | ⁂ Triple Shot | 9% | Every shot fires 3 paintballs |
 | ★ Golden Gun | 3% | Every hit counts double |
 
-**Defenses** go in your item slot (one at a time). Place one with **E** or right-click
-(or the item button on a phone). It stays where you put it. Defenses that can be shot down have no timer:
+**Defenses** go into one of 3 carry slots, shown as numbered boxes above your ammo. Press **1**, **2** or **3**
+to place that one, or **E** / right-click to place the highlighted one (move the highlight with the mouse
+wheel or Tab). On a phone, each carried defense gets its own button. With all 3 slots full, defenses stay on
+the ground for someone else. It stays where you put it. Defenses that can be shot down have no timer:
 they last until enemies destroy them (bots go after enemy turrets). Each player can have up to 3 of
 these standing; placing a 4th removes their oldest. The others run on a timer:
 
@@ -57,8 +59,8 @@ If a friend and the host end up on different versions, joining says so and asks 
 3. After a minute or two the page is live at the address shown at the top of the Pages settings.
 
 **Controls**
-- Computer: WASD/arrows move · mouse aim · click shoot · R reload · Shift sprint
-- Phone/tablet: left thumb moves, right thumb aims and shoots (with a little aim assist), ⟳ reloads, » toggles sprint
+- Computer: WASD/arrows move · mouse aim · click shoot · R reload · Shift sprint · 1/2/3 or E place a defense
+- Phone/tablet: left thumb moves, right thumb aims and shoots (with a little aim assist), ⟳ reloads, » toggles sprint, a defense's button places it
 
 The game switches controls based on what you use: touching the screen shows the joysticks, and using a mouse or keyboard hides them. On small screens the view zooms out and the on-screen info gets smaller.
 
