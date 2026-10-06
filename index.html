@@ -56,7 +56,8 @@
   const PLAYER_SPEED = 230;
   const SPRINT_MULT = 1.5;
   const STAMINA_MAX = 2;          // seconds of sprint
-  const MAX_HP = 3;               // hits to splat
+  const MAX_HP = 3;               // hits to splat a bot
+  const PLAYER_HP = 5;            // hits to splat you (easier)
   const MAG_SIZE = 12;
   const FIRE_DELAY = 0.16;
   const RELOAD_TIME = 1.4;
@@ -65,7 +66,7 @@
   const BALL_R = 5;
   const SPREAD = 0.05;
   const RESPAWN_TIME = 3;
-  const SPAWN_SHIELD = 2;
+  const SPAWN_SHIELD = 3;
   const NUM_BOTS = 9;
   const COLORS = ['#ff3d7f', '#3da5ff', '#ffd23d', '#3dff8b', '#b03dff', '#ff8a3d', '#3dfff0', '#ff3d3d', '#9cff3d', '#ffffff'];
   const BOT_NAMES = ['Splatty', 'Blobby', 'Drip', 'Smudge', 'Neon', 'Goober', 'Pellet', 'Squish', 'Rainbow', 'Sploosh', 'Zippy', 'Mango'];
@@ -245,6 +246,7 @@
     return {
       name, color, isBot,
       x: 0, y: 0, vx: 0, vy: 0, aim: 0,
+      maxHp: isBot ? MAX_HP : PLAYER_HP,
       hp: MAX_HP, ammo: MAG_SIZE, reload: 0, cooldown: 0,
       stamina: STAMINA_MAX,
       alive: false, respawn: 0, shield: 0, hitFlash: 0,
@@ -257,7 +259,7 @@
   function spawn(p) {
     const s = freeSpot();
     p.x = s.x; p.y = s.y;
-    p.hp = MAX_HP; p.ammo = MAG_SIZE; p.reload = 0; p.cooldown = 0.3;
+    p.hp = p.maxHp; p.ammo = MAG_SIZE; p.reload = 0; p.cooldown = 0.3;
     p.stamina = STAMINA_MAX;
     p.alive = true; p.shield = SPAWN_SHIELD; p.target = null;
   }
@@ -285,12 +287,35 @@
     }
   }
 
+  // ---------- Feedback effects ----------
+  let shake = 0, hitMarker = 0, banner = null;
+  let rings = [], popups = [];
+  let audio = null;
+  function sound(kind) {
+    try {
+      audio = audio || new (window.AudioContext || window.webkitAudioContext)();
+      const t = audio.currentTime, o = audio.createOscillator(), g = audio.createGain();
+      o.connect(g); g.connect(audio.destination);
+      if (kind === 'kill') {
+        o.type = 'square';
+        o.frequency.setValueAtTime(660, t); o.frequency.setValueAtTime(990, t + 0.08);
+        g.gain.setValueAtTime(0.12, t); g.gain.exponentialRampToValueAtTime(0.001, t + 0.3);
+        o.start(t); o.stop(t + 0.3);
+      } else {
+        o.type = 'triangle'; o.frequency.setValueAtTime(1400, t);
+        g.gain.setValueAtTime(0.06, t); g.gain.exponentialRampToValueAtTime(0.001, t + 0.06);
+        o.start(t); o.stop(t + 0.06);
+      }
+    } catch (e) { /* sound is optional */ }
+  }
+
   function hitPlayer(victim, ball) {
     if (victim.shield > 0) { burst(ball.x, ball.y, '#ffffff', 6, 120); return; }
     victim.hp--;
     victim.hitFlash = 0.15;
     burst(ball.x, ball.y, ball.color, 10, 200);
     splat(victim.x + rand(-10, 10), victim.y + rand(-10, 10), ball.color, 9);
+    if (ball.owner === me && victim.hp > 0) { hitMarker = 0.15; sound('hit'); }
     if (victim.hp <= 0) kill(victim, ball.owner);
   }
 
@@ -304,6 +329,14 @@
     burst(victim.x, victim.y, killer.color, 40, 380);
     killer.kills++;
     killer.streak++;
+    if (killer === me) {
+      shake = 14; hitMarker = 0.3;
+      rings.push({ x: victim.x, y: victim.y, t: 0, color: me.color });
+      popups.push({ x: victim.x, y: victim.y - 30, t: 0, text: 'SPLAT!' });
+      banner = { text: `You splatted ${victim.name}!`, sub: killer.streak > 1 ? `${killer.streak} in a row` : '', t: 2.2 };
+      sound('kill');
+    }
+    if (victim === me) shake = 10;
     let msg = `${killer.name} splatted ${victim.name}`;
     if (killer.streak === 3) msg += ' — ON FIRE! 🔥';
     if (killer.streak === 5) msg += ' — UNSTOPPABLE!';
@@ -330,7 +363,7 @@
     if (b.thinkT <= 0) {
       b.thinkT = rand(0.25, 0.5);
       // Pick nearest visible enemy (bushes hide you unless very close)
-      let best = null, bestD = 650 * 650;
+      let best = null, bestD = 520 * 520;
       for (const o of players) {
         if (o === b || !o.alive) continue;
         const d = dist2(b.x, b.y, o.x, o.y);
@@ -339,7 +372,7 @@
         if (!lineOfSight(b.x, b.y, o.x, o.y)) continue;
         best = o; bestD = d;
       }
-      if (best && best !== b.target) b.reactT = rand(0.2, 0.45); // reaction delay on new target
+      if (best && best !== b.target) b.reactT = rand(0.5, 0.9); // reaction delay on new target
       b.target = best;
       if (Math.random() < 0.3) b.strafe *= -1;
       if (!best) b.wanderA += rand(-0.8, 0.8);
@@ -352,7 +385,7 @@
       // Lead the target a little, with imperfect aim
       const lead = d / BALL_SPEED * 0.6;
       const aimTo = Math.atan2(t.y + t.vy * lead - b.y, t.x + t.vx * lead - b.x);
-      b.aim = aimTo + rand(-0.12, 0.12);
+      b.aim = aimTo + rand(-0.25, 0.25);
       const ux = dx / d, uy = dy / d;
       // Keep medium range, strafe sideways
       const pref = 300;
@@ -361,7 +394,7 @@
       my = uy * radial + ux * b.strafe * 0.9;
       if (b.hp === 1 && b.ammo < 3) { mx = -ux; my = -uy; } // retreat when weak
       b.reactT -= dt;
-      if (b.reactT <= 0 && b.reload <= 0 && Math.random() < 0.35) shoot(b);
+      if (b.reactT <= 0 && b.reload <= 0 && Math.random() < 0.18) shoot(b);
     } else {
       mx = Math.cos(b.wanderA); my = Math.sin(b.wanderA);
       b.aim = b.wanderA;
@@ -462,6 +495,13 @@
       q.x += q.vx * dt; q.y += q.vy * dt; q.vx *= 0.9; q.vy *= 0.9; q.life -= dt;
       if (q.life <= 0) particles.splice(i, 1);
     }
+    shake = Math.max(0, shake - dt * 40);
+    hitMarker = Math.max(0, hitMarker - dt);
+    if (banner && (banner.t -= dt) <= 0) banner = null;
+    for (const g of rings) g.t += dt;
+    rings = rings.filter(g => g.t < 0.6);
+    for (const q of popups) q.t += dt;
+    popups = popups.filter(q => q.t < 1.2);
     for (let i = feed.length - 1; i >= 0; i--) { feed[i].t -= dt; if (feed[i].t <= 0) feed.splice(i, 1); }
   }
 
@@ -514,9 +554,9 @@
     ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(0,0,0,.6)'; ctx.fillStyle = '#fff';
     ctx.strokeText(p.name, p.x, p.y - PLAYER_R - 16);
     ctx.fillText(p.name, p.x, p.y - PLAYER_R - 16);
-    for (let i = 0; i < MAX_HP; i++) {
+    for (let i = 0; i < p.maxHp; i++) {
       ctx.fillStyle = i < p.hp ? '#ff4d6d' : 'rgba(0,0,0,.35)';
-      ctx.beginPath(); ctx.arc(p.x + (i - (MAX_HP - 1) / 2) * 11, p.y - PLAYER_R - 6, 4, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(p.x + (i - (p.maxHp - 1) / 2) * 11, p.y - PLAYER_R - 6, 4, 0, Math.PI * 2); ctx.fill();
     }
     ctx.restore();
   }
@@ -532,7 +572,8 @@
     camY = H >= WORLD ? (WORLD - H) / 2 : clamp(camY, 0, WORLD - H);
     ctx.fillStyle = '#152017'; ctx.fillRect(0, 0, W, H);
     ctx.save();
-    ctx.translate(-Math.round(camX), -Math.round(camY));
+    const sx = shake ? rand(-shake, shake) : 0, sy = shake ? rand(-shake, shake) : 0;
+    ctx.translate(-Math.round(camX + sx), -Math.round(camY + sy));
 
     // Ground + grid
     ctx.fillStyle = '#5f9a55'; ctx.fillRect(0, 0, WORLD, WORLD);
@@ -588,6 +629,28 @@
     for (const q of particles) {
       ctx.globalAlpha = clamp(q.life * 2.5, 0, 1);
       ctx.fillStyle = q.color; ctx.beginPath(); ctx.arc(q.x, q.y, q.r, 0, Math.PI * 2); ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+
+    // Kill shockwave rings
+    for (const g of rings) {
+      const k = g.t / 0.6;
+      ctx.globalAlpha = 1 - k;
+      ctx.strokeStyle = g.color; ctx.lineWidth = 10 * (1 - k) + 2;
+      ctx.beginPath(); ctx.arc(g.x, g.y, 20 + k * 120, 0, Math.PI * 2); ctx.stroke();
+      ctx.strokeStyle = '#fff'; ctx.lineWidth = 3 * (1 - k);
+      ctx.beginPath(); ctx.arc(g.x, g.y, 10 + k * 80, 0, Math.PI * 2); ctx.stroke();
+    }
+    // "SPLAT!" popups: pop in, float up, fade out
+    for (const q of popups) {
+      const k = q.t / 1.2, pop = q.t < 0.15 ? q.t / 0.15 * 1.4 : 1 + 0.4 * Math.max(0, 1 - (q.t - 0.15) / 0.15);
+      ctx.save();
+      ctx.globalAlpha = k < 0.7 ? 1 : (1 - k) / 0.3;
+      ctx.translate(q.x, q.y - k * 50); ctx.scale(pop, pop); ctx.rotate(-0.12);
+      ctx.font = '900 34px system-ui'; ctx.textAlign = 'center';
+      ctx.lineWidth = 6; ctx.strokeStyle = '#000'; ctx.strokeText(q.text, 0, 0);
+      ctx.fillStyle = '#ffe066'; ctx.fillText(q.text, 0, 0);
+      ctx.restore();
     }
     ctx.globalAlpha = 1;
     ctx.restore();
@@ -666,6 +729,29 @@
     ctx.textAlign = 'right'; ctx.font = 'bold 14px system-ui'; ctx.fillStyle = '#fff';
     ctx.fillText(`Splats: ${me.kills}   Deaths: ${me.deaths}`, W - 14, H - 16);
 
+    // Hit marker at the crosshair
+    if (hitMarker > 0 && me.alive) {
+      ctx.strokeStyle = '#fff'; ctx.lineWidth = 3; ctx.globalAlpha = clamp(hitMarker * 6, 0, 1);
+      const a = 6, b = 14;
+      ctx.beginPath();
+      for (const [dx, dy] of [[1, 1], [1, -1], [-1, 1], [-1, -1]]) { ctx.moveTo(mouseX + dx * a, mouseY + dy * a); ctx.lineTo(mouseX + dx * b, mouseY + dy * b); }
+      ctx.stroke(); ctx.globalAlpha = 1;
+    }
+
+    // "You splatted X!" banner
+    if (banner) {
+      ctx.globalAlpha = clamp(banner.t * 2, 0, 1);
+      ctx.textAlign = 'center';
+      ctx.font = '900 30px system-ui';
+      ctx.lineWidth = 6; ctx.strokeStyle = 'rgba(0,0,0,.7)';
+      ctx.strokeText(banner.text, W / 2, 110); ctx.fillStyle = me.color; ctx.fillText(banner.text, W / 2, 110);
+      if (banner.sub) {
+        ctx.font = 'bold 18px system-ui';
+        ctx.strokeText(banner.sub, W / 2, 138); ctx.fillStyle = '#fff'; ctx.fillText(banner.sub, W / 2, 138);
+      }
+      ctx.globalAlpha = 1;
+    }
+
     // Death screen
     if (!me.alive) {
       ctx.fillStyle = 'rgba(0,0,0,.45)'; ctx.fillRect(0, 0, W, H);
@@ -702,7 +788,7 @@
     const name = document.getElementById('name').value.trim() || 'You';
     buildMap();
     pctx.clearRect(0, 0, paint.width, paint.height);
-    players = []; balls = []; particles = []; feed = [];
+    players = []; balls = []; particles = []; feed = []; rings = []; popups = []; banner = null;
     me = makePlayer(name, chosen, false);
     players.push(me);
     const botColors = COLORS.filter(c => c !== chosen);
