@@ -104,6 +104,7 @@
   #teamList .yes { background: #3dff8b; color: #102a17; }
   #teamList .quit { background: #eee; color: #b8336a; }
   #teamList .empty { color: #777; font-size: 14px; }
+  #teamList .tag { font-size: 11px; color: #777; border: 1px solid #ccc; border-radius: 4px; padding: 0 5px; }
   #update:disabled { cursor: default; opacity: .85; }
   #netmsg { min-height: 18px; margin-top: 8px; font-size: 13px; color: #b8336a; font-weight: 600; }
   button:focus-visible, input:focus-visible { outline: 3px solid #3da5ff; outline-offset: 2px; }
@@ -126,7 +127,8 @@
   <div class="tcard" role="dialog" aria-labelledby="teamTitle">
     <div class="thead"><h2 id="teamTitle">Teams</h2><button id="teamClose" aria-label="Close">✕</button></div>
     <p class="tnote">Teammates' paint passes through each other, turrets won't shoot your teammate,
-      and teammates show on your minimap. Leaving a team takes 3 seconds.</p>
+      and teammates show on your minimap. Leaving a team takes 3 seconds.
+      Bots can be teammates too: each has at most one, and won't team with someone who just splatted them.</p>
     <ul id="teamList"></ul>
   </div>
 </div>
@@ -499,6 +501,7 @@
     victim.respawn = RESPAWN_TIME;
     victim.deaths++;
     victim.streak = 0;
+    victim.grudge = { id: killer.id, at: performance.now() }; // bots won't team with whoever just splatted them
     killer.kills++;
     killer.streak++;
     fx({ t: 'kill', v: victim.id, k: killer.id, vn: victim.name, kn: killer.name, vc: victim.color, kc: killer.color, st: killer.streak, x: victim.x, y: victim.y });
@@ -617,32 +620,40 @@
   }
 
   // ---------- Teams ----------
-  // Two real players can agree to be a team: their paint passes through each other. Any player
-  // can be on teams with several others (each pair agrees separately). Leaving takes 3 seconds,
-  // so nobody can turn on a teammate without warning. The host's device keeps the official list.
+  // Two players (people or bots) can agree to be a team: their paint passes through each other.
+  // A person can be on teams with several others (each pair agrees separately); a bot has at most
+  // one teammate. Leaving takes 3 seconds, so nobody can turn on a teammate without warning.
+  // Bots pair up on their own, answer requests, sometimes ask you, and eventually move on.
+  // In multiplayer the host's device keeps the official list.
   const TEAM_ASK_TIME = 20, TEAM_BREAK_TIME = 3;
   let alliances = {};   // "a|b" -> { breakT } (breakT > 0: leaving, counting down)
   let requests = {};    // "from>to" -> seconds left to answer
+  let botAnswers = {};  // "from>to" where "to" is a bot -> seconds until it decides
+  let botTeamT = 8;     // seconds until some bot looks for a teammate
+  const teamCount = (id) => Object.keys(alliances).filter(k => k.split('|').includes(id)).length;
   const pairKey = (a, b) => (a < b ? a + '|' + b : b + '|' + a);
   const allied = (a, b) => a !== b && !!alliances[pairKey(a, b)];
   const friendly = (a, b) => a === b || allied(a, b);
 
-  function teamAction(fromId, act, withId) {
+  function teamAction(fromId, act, withId, why) {
     const a = players.find(q => q.id === fromId), b = players.find(q => q.id === withId);
-    if (!a || !b || a === b || a.isBot || b.isBot) return;
+    if (!a || !b || a === b) return;
     const k = pairKey(a.id, b.id), names = { a: a.id, b: b.id, an: a.name, bn: b.name };
     if (act === 'ask') {
       if (alliances[k]) return;
       if (requests[b.id + '>' + a.id]) return teamAction(a.id, 'accept', b.id); // they already asked you
       requests[a.id + '>' + b.id] = TEAM_ASK_TIME;
+      if (b.isBot) botAnswers[a.id + '>' + b.id] = rand(1, 2.5); // a bot "thinks it over"
       fx({ t: 'team', e: 'ask', ...names });
     } else if (act === 'accept' && requests[b.id + '>' + a.id]) {
       delete requests[b.id + '>' + a.id];
-      alliances[k] = { breakT: 0 };
+      // A bot stays on a team for a few minutes, then moves on (people stay until they choose to leave)
+      const life = a.isBot || b.isBot ? (a.isBot && b.isBot ? rand(90, 180) : rand(150, 300)) : 0;
+      alliances[k] = { breakT: 0, life };
       fx({ t: 'team', e: 'join', ...names });
     } else if (act === 'decline' && requests[b.id + '>' + a.id]) {
       delete requests[b.id + '>' + a.id];
-      fx({ t: 'team', e: 'no', ...names });
+      fx({ t: 'team', e: 'no', why, ...names });
     } else if (act === 'cancel') {
       delete requests[a.id + '>' + b.id];
     } else if (act === 'break' && alliances[k] && !alliances[k].breakT) {
@@ -651,8 +662,45 @@
     }
   }
   function updateTeams(dt) {
-    for (const k of Object.keys(requests)) if ((requests[k] -= dt) <= 0) delete requests[k];
+    for (const k of Object.keys(requests)) if ((requests[k] -= dt) <= 0) { delete requests[k]; delete botAnswers[k]; }
+
+    // Bots answer requests sent to them
+    for (const k of Object.keys(botAnswers)) {
+      if ((botAnswers[k] -= dt) > 0) continue;
+      delete botAnswers[k];
+      const [from, to] = k.split('>'), bot = players.find(q => q.id === to);
+      if (!bot || !requests[k]) continue;
+      const g = bot.grudge, angry = g && g.id === from && performance.now() - g.at < 30000;
+      if (teamCount(bot.id) >= 1) teamAction(bot.id, 'decline', from, 'busy');
+      else if (angry) teamAction(bot.id, 'decline', from, 'grudge');
+      else if (Math.random() < 0.75) teamAction(bot.id, 'accept', from);
+      else teamAction(bot.id, 'decline', from);
+    }
+
+    // Every so often a bot without a teammate asks someone nearby (usually another bot)
+    if ((botTeamT -= dt) <= 0) {
+      botTeamT = rand(8, 16);
+      const lonely = players.filter(q => q.isBot && q.alive && !q.target && teamCount(q.id) === 0);
+      const bot = lonely[Math.floor(Math.random() * lonely.length)];
+      if (bot) {
+        const now = performance.now();
+        const near = players.filter(q => q !== bot && q.alive && !allied(q.id, bot.id) && dist2(q.x, q.y, bot.x, bot.y) < 900 * 900 &&
+          (q.isBot ? teamCount(q.id) === 0 : !(q.botAskedAt && now - q.botAskedAt < 45000)) && // don't pester people
+          !requests[bot.id + '>' + q.id] && !requests[q.id + '>' + bot.id]);
+        const bots = near.filter(q => q.isBot), people = near.filter(q => !q.isBot);
+        const pick = (people.length && (Math.random() < 0.25 || !bots.length)) ? people : bots;
+        const who = pick[Math.floor(Math.random() * pick.length)];
+        if (who) { if (!who.isBot) who.botAskedAt = now; teamAction(bot.id, 'ask', who.id); }
+      }
+    }
+
     for (const [k, v] of Object.entries(alliances)) {
+      // A bot's team runs its course: the bot starts the 3-second goodbye
+      if (v.life > 0 && !v.breakT && (v.life -= dt) <= 0) {
+        const [a, b] = k.split('|').map(id => players.find(q => q.id === id));
+        const bot = a && a.isBot ? a : b;
+        if (a && b) teamAction(bot.id, 'break', bot === a ? b.id : a.id);
+      }
       if (v.breakT > 0 && (v.breakT -= dt) <= 0) {
         delete alliances[k];
         const [a, b] = k.split('|').map(id => players.find(q => q.id === id));
@@ -662,12 +710,12 @@
   }
   function dropTeamsOf(id) {
     for (const k of Object.keys(alliances)) if (k.split('|').includes(id)) delete alliances[k];
-    for (const k of Object.keys(requests)) if (k.split('>').includes(id)) delete requests[k];
+    for (const k of Object.keys(requests)) if (k.split('>').includes(id)) { delete requests[k]; delete botAnswers[k]; }
   }
   // Your own clicks: the host acts directly, a friend sends it to the host
   function requestTeam(act, withId) {
     if (!me) return;
-    if (mode === 'host') teamAction(me.id, act, withId);
+    if (mode !== 'client') teamAction(me.id, act, withId);
     else if (mode === 'client' && hostConn && hostConn.open) { try { hostConn.send({ t: 'team', act, with: withId }); } catch (e) { /* dropped */ } }
   }
 
@@ -687,12 +735,13 @@
     else if (e.t === 'team') {
       const mine = e.a === myId || e.b === myId, other = e.a === myId ? e.bn : e.an;
       if (e.e === 'ask' && e.a === myId) addFeed(`Asked ${e.bn} to team up`, true);
-      else if (e.e === 'no' && e.b === myId) addFeed(`${e.an} said no thanks`, true);
+      else if (e.e === 'no' && e.b === myId) addFeed(e.why === 'busy' ? `${e.an} already has a teammate`
+        : e.why === 'grudge' ? `${e.an} won't team up with you: you just splatted them!` : `${e.an} said no thanks`, true);
       else if (e.e === 'join') {
         addFeed(`${e.an} and ${e.bn} teamed up 🤝`, mine);
         if (mine) { banner = { text: `🤝 You and ${other} are a team!`, sub: "Your paint can't hurt each other", t: 2.6, color: '#3dff8b' }; sound('pick'); }
       } else if (e.e === 'leaving') {
-        addFeed(`${e.an} is leaving the team with ${e.bn}`, mine);
+        if (mine) addFeed(`${e.an} is leaving the team with ${e.bn}`, true);
         if (mine) banner = { text: `Team with ${other} ends in ${TEAM_BREAK_TIME}…`, sub: 'Get to cover!', t: TEAM_BREAK_TIME, color: '#ff8a3d' };
       } else if (e.e === 'over') addFeed(`${e.an} and ${e.bn} are no longer a team`, mine);
     }
@@ -835,7 +884,7 @@
     const n = ['Digit1', 'Digit2', 'Digit3', 'Numpad1', 'Numpad2', 'Numpad3'].indexOf(e.code) % 3;
     if (n >= 0 && e.code.length && me && me.alive && !e.repeat) requestUse(n);
     if (e.code === 'Tab' && running) { e.preventDefault(); cycleSel(1); }
-    if (e.code === 'KeyT' && running && mode !== 'solo' && !e.repeat) toggleTeamPanel();
+    if (e.code === 'KeyT' && running && !e.repeat) toggleTeamPanel();
     if (e.code === 'Escape') teamPanel.hidden = true;
     if ((e.code === 'KeyY' || e.code === 'KeyN') && running && !e.repeat) answerTeam(e.code === 'KeyY');
   });
@@ -850,7 +899,7 @@
       // Pick nearest visible enemy (bushes hide you unless very close)
       let best = null, bestD = 520 * 520;
       for (const o of players) {
-        if (o === b || !o.alive) continue;
+        if (friendly(o.id, b.id) || !o.alive) continue;
         const d = dist2(b.x, b.y, o.x, o.y);
         if (d > bestD) continue;
         if (inBush(o) && d > 110 * 110) continue;
@@ -859,7 +908,7 @@
       }
       // Enemy turrets are fair game too (otherwise they'd never come down)
       for (const t of deploys) {
-        if (t.type !== 'turret' || t.owner === b.id) continue;
+        if (t.type !== 'turret' || friendly(t.owner, b.id)) continue;
         const d = dist2(b.x, b.y, t.x, t.y);
         if (d < bestD && lineOfSight(b.x, b.y, t.x, t.y)) { best = t; bestD = d; }
       }
@@ -868,13 +917,16 @@
       if (Math.random() < 0.3) b.strafe *= -1;
       if (!best) {
         b.wanderA += rand(-0.8, 0.8);
+        // Stick with a teammate; otherwise drift toward the nearest player to find a fight
+        const mate = players.find(o => o.alive && allied(o.id, b.id));
         let near = null, nd = 1600 * 1600;
         for (const o of players) {
-          if (o === b || !o.alive) continue;
+          if (friendly(o.id, b.id) || !o.alive) continue;
           const d = dist2(b.x, b.y, o.x, o.y);
           if (d < nd) { near = o; nd = d; }
         }
-        if (near && Math.random() < 0.35) b.wanderA = Math.atan2(near.y - b.y, near.x - b.x) + rand(-0.6, 0.6);
+        if (mate && dist2(b.x, b.y, mate.x, mate.y) > 220 * 220) b.wanderA = Math.atan2(mate.y - b.y, mate.x - b.x) + rand(-0.3, 0.3);
+        else if (near && Math.random() < 0.35) b.wanderA = Math.atan2(near.y - b.y, near.x - b.x) + rand(-0.6, 0.6);
       }
     }
 
@@ -1035,7 +1087,7 @@
 
     updateDrops(dt);
     updateDeploys(dt);
-    if (mode === 'host') updateTeams(dt);
+    if (mode !== 'client') updateTeams(dt);
 
     // Paintballs
     for (let i = balls.length - 1; i >= 0; i--) {
@@ -1236,6 +1288,7 @@
       b.alive = false;
       players = players.filter(p => p !== b);
       removeDeploysOf(b.id);
+      dropTeamsOf(b.id);
     }
     const used = new Set(players.map(p => p.name));
     while (bots.length < want) {
@@ -2020,8 +2073,8 @@
   document.getElementById('teamNo').onclick = () => answerTeam(false);
 
   function refreshTeamsUI() {
-    const show = running && mode !== 'solo' && !!me;
-    const others = show ? players.filter(q => !q.isBot && q !== me) : [];
+    const show = running && !!me;
+    const others = show ? players.filter(q => q !== me).sort((a, b) => a.isBot - b.isBot || a.name.localeCompare(b.name)) : [];
     const ask = show ? incomingAsk() : null;
     const sig = [show, teamPanel.hidden, ask && ask.id, others.map(q => q.id + q.name + q.color).join(),
       JSON.stringify(Object.entries(alliances).map(([k, v]) => [k, Math.ceil(v.breakT)])), Object.keys(requests).join()].join('~');
@@ -2036,7 +2089,7 @@
     teamList.textContent = '';
     if (!others.length) {
       const li = document.createElement('li'); li.className = 'empty';
-      li.textContent = 'No other players yet. Share the room code so friends can join.';
+      li.textContent = 'Nobody else is here right now.';
       teamList.appendChild(li);
     }
     for (const q of others) {
@@ -2044,6 +2097,7 @@
       const dot = document.createElement('span'); dot.className = 'dot'; dot.style.background = q.color;
       const nm = document.createElement('span'); nm.className = 'nm'; nm.textContent = q.name;
       li.append(dot, nm);
+      if (q.isBot) { const tag = document.createElement('span'); tag.className = 'tag'; tag.textContent = 'bot'; li.appendChild(tag); }
       const al = alliances[pairKey(me.id, q.id)];
       const btn = (text, cls, act) => { const b = document.createElement('button'); b.textContent = text; b.className = cls; b.onclick = () => requestTeam(act, q.id); li.appendChild(b); };
       const note = (text) => { const st = document.createElement('span'); st.className = 'st'; st.textContent = text; li.appendChild(st); };

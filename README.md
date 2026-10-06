@@ -40,8 +40,9 @@ Chances are per drop, so a Golden Gun turns up about once every 67 splats.
 
 ## Teams
 
-In a multiplayer game, tap **👥 Teams** at the top (or press **T**) to see the other players.
-Tap **Team up** next to someone; they get a pop-up to **Accept** (Y) or say **No thanks** (N).
+Tap **👥 Teams** at the top (or press **T**) to see everyone in the game, people and bots.
+Tap **Team up** next to someone; a person gets a pop-up to **Accept** (Y) or say **No thanks** (N),
+and a bot decides after a moment.
 
 Teammates:
 - can't splat each other: their paint passes straight through
@@ -49,8 +50,13 @@ Teammates:
 - have a green dashed ring and 🤝 by their name
 
 Either player can **Leave team** from the same list. It takes 3 seconds (the ring turns orange)
-so nobody can turn on a teammate without warning. You can team up with more than one person;
-each pair agrees separately. Bots are never on a team.
+so nobody can turn on a teammate without warning. A person can team up with several others;
+each pair agrees separately.
+
+**Bots and teams:** bots pair up with each other now and then, and sometimes ask you. A bot has
+at most one teammate, usually says yes when asked, but says no if you splatted it in the last
+30 seconds. Bot teams last a few minutes, then the bot moves on (with the same 3-second warning).
+Bots stick near their teammate when there's nobody to fight. Teams work in solo games too.
 
 ## Updates without losing your game
 
