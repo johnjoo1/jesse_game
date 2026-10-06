@@ -38,6 +38,21 @@ these standing; placing a 4th removes their oldest. The others run on a timer:
 
 Chances are per drop, so a Golden Gun turns up about once every 67 splats.
 
+## Teams
+
+In a multiplayer game, tap **👥 Teams** at the top (or press **T**) to see the other players.
+Tap **Team up** next to someone; they get a pop-up to **Accept** (Y) or say **No thanks** (N).
+
+Teammates:
+- can't splat each other: their paint passes straight through
+- can shoot through each other's barricades, and heal at each other's heal stations
+- aren't targeted by each other's turrets, and show as green dots on each other's minimap
+- have a green dashed ring and 🤝 by their name
+
+Either player can **Leave team** from the same list. It takes 3 seconds (the ring turns orange)
+so nobody can turn on a teammate without warning. You can team up with more than one person;
+each pair agrees separately. Bots are never on a team.
+
 ## Updates without losing your game
 
 The page checks every 90 seconds whether a newer version is online. If there is one, an
@@ -59,7 +74,7 @@ If a friend and the host end up on different versions, joining says so and asks 
 3. After a minute or two the page is live at the address shown at the top of the Pages settings.
 
 **Controls**
-- Computer: WASD/arrows move · mouse aim · click shoot · R reload · Shift sprint · 1/2/3 or E place a defense
+- Computer: WASD/arrows move · mouse aim · click shoot · R reload · Shift sprint · 1/2/3 or E place a defense · T teams
 - Phone/tablet: left thumb moves, right thumb aims and shoots (with a little aim assist), ⟳ reloads, » toggles sprint, a defense's button places it
 
 The game switches controls based on what you use: touching the screen shows the joysticks, and using a mouse or keyboard hides them. On small screens the view zooms out and the on-screen info gets smaller.

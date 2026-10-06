@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Paintball Wars</title>
 <style>
+  [hidden] { display: none !important; } /* so display: flex rules never un-hide things */
   html, body { margin: 0; height: 100%; overflow: hidden; background: #1d2b1f; font-family: system-ui, sans-serif; }
   canvas { display: block; cursor: crosshair; touch-action: none; }
   body { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
@@ -63,12 +64,46 @@
     width: 76px; flex: none; margin: 0; text-align: center; text-transform: uppercase;
     font-weight: 700; letter-spacing: .12em; font-size: 16px; padding: 8px 4px;
   }
-  #update {
+  #topstack {
     position: fixed; z-index: 10; left: 50%; transform: translateX(-50%);
     top: calc(46px + env(safe-area-inset-top, 0px)); max-width: calc(100vw - 32px);
+    display: flex; flex-direction: column; align-items: center; gap: 8px; pointer-events: none;
+  }
+  #topstack > * { pointer-events: auto; }
+  #update, #teamBtn {
     background: #ffe066; color: #222; border: 0; border-radius: 999px; padding: 8px 16px;
     font: 700 14px system-ui, sans-serif; box-shadow: 0 4px 16px rgba(0,0,0,.35); cursor: pointer;
   }
+  #teamBtn { background: rgba(0,0,0,.6); color: #fff; padding: 6px 14px; font-size: 13px; }
+  #teamBtn.ping { background: #3dff8b; color: #102a17; }
+  .key { font-size: 11px; opacity: .65; border: 1px solid currentColor; border-radius: 4px; padding: 0 4px; margin-left: 4px; }
+  body.touch .key { display: none; }
+  #teamAsk {
+    display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 8px;
+    background: #102a17; color: #fff; border: 2px solid #3dff8b; border-radius: 14px; padding: 10px 12px;
+    font: 600 14px system-ui, sans-serif; box-shadow: 0 6px 20px rgba(0,0,0,.45);
+  }
+  #teamAsk button, #teamList button {
+    border: 0; border-radius: 8px; padding: 7px 12px; font: 700 13px system-ui, sans-serif; cursor: pointer;
+  }
+  #teamYes { background: #3dff8b; color: #102a17; }
+  #teamNo { background: #3a3f4a; color: #fff; }
+  #teamPanel { position: fixed; inset: 0; z-index: 20; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,.35); }
+  #teamPanel[hidden] { display: none; }
+  .tcard { background: #fff; color: #222; border-radius: 16px; padding: 16px 18px; width: min(360px, calc(100vw - 32px)); max-height: calc(100vh - 32px); overflow: auto; }
+  .thead { display: flex; align-items: center; justify-content: space-between; }
+  .thead h2 { margin: 0; font-size: 20px; }
+  #teamClose { border: 0; background: none; font-size: 18px; cursor: pointer; padding: 4px 8px; }
+  .tnote { font-size: 13px; color: #555; line-height: 1.45; margin: 8px 0 12px; }
+  #teamList { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+  #teamList li { display: flex; align-items: center; gap: 10px; min-height: 36px; }
+  #teamList .dot { width: 14px; height: 14px; border-radius: 50%; flex: none; }
+  #teamList .nm { flex: 1; min-width: 0; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #teamList .st { font-size: 12px; color: #2a8a52; font-weight: 700; }
+  #teamList .go { background: #222; color: #fff; }
+  #teamList .yes { background: #3dff8b; color: #102a17; }
+  #teamList .quit { background: #eee; color: #b8336a; }
+  #teamList .empty { color: #777; font-size: 14px; }
   #update:disabled { cursor: default; opacity: .85; }
   #netmsg { min-height: 18px; margin-top: 8px; font-size: 13px; color: #b8336a; font-weight: 600; }
   button:focus-visible, input:focus-visible { outline: 3px solid #3da5ff; outline-offset: 2px; }
@@ -78,7 +113,23 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/peerjs/1.5.4/peerjs.min.js"
         onerror="var s=document.createElement('script');s.src='https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js';document.head.appendChild(s)"></script>
 <canvas id="c"></canvas>
-<button id="update" hidden></button>
+<div id="topstack">
+  <button id="teamBtn" hidden>👥 Teams <span class="key">T</span></button>
+  <div id="teamAsk" hidden role="alert">
+    <span id="teamAskText"></span>
+    <button id="teamYes">Accept <span class="key">Y</span></button>
+    <button id="teamNo">No thanks <span class="key">N</span></button>
+  </div>
+  <button id="update" hidden></button>
+</div>
+<div id="teamPanel" hidden>
+  <div class="tcard" role="dialog" aria-labelledby="teamTitle">
+    <div class="thead"><h2 id="teamTitle">Teams</h2><button id="teamClose" aria-label="Close">✕</button></div>
+    <p class="tnote">Teammates' paint passes through each other. You also share barricades and heal stations,
+      turrets won't shoot your teammate, and teammates show on your minimap. Leaving a team takes 3 seconds.</p>
+    <ul id="teamList"></ul>
+  </div>
+</div>
 <div id="menu">
   <div class="card">
     <h1>Paintball Wars</h1>
@@ -97,7 +148,7 @@
     </div>
     <div class="keys desk-only">
       <b>WASD</b> move &nbsp;·&nbsp; <b>Mouse</b> aim &nbsp;·&nbsp; <b>Click</b> shoot<br>
-      <b>R</b> reload &nbsp;·&nbsp; <b>Shift</b> sprint &nbsp;·&nbsp; <b>1 2 3</b> or <b>E</b> place defense
+      <b>R</b> reload &nbsp;·&nbsp; <b>Shift</b> sprint &nbsp;·&nbsp; <b>1 2 3</b> or <b>E</b> place defense &nbsp;·&nbsp; <b>T</b> teams
     </div>
     <div class="keys touch-only">
       <b>Left thumb</b> move &nbsp;·&nbsp; <b>Right thumb</b> aim + shoot<br>
@@ -326,9 +377,9 @@
     const t = clamp(((cx - x1) * dx + (cy - y1) * dy) / l2, 0, 1);
     return dist2(x1 + dx * t, y1 + dy * t, cx, cy) < r * r;
   }
-  // ownerId: that player's own barricades don't block (their paint flies through their own wall)
+  // ownerId: that player's (and their teammates') barricades don't block their paint
   function lineOfSight(x1, y1, x2, y2, ownerId) {
-    for (const r of rects) if ((!r.dep || r.dep.owner !== ownerId || ownerId === undefined) && segRect(x1, y1, x2, y2, r)) return false;
+    for (const r of rects) if ((!r.dep || ownerId === undefined || !friendly(r.dep.owner, ownerId)) && segRect(x1, y1, x2, y2, r)) return false;
     for (const o of rocks) if (segCircle(x1, y1, x2, y2, o.x, o.y, o.r)) return false;
     return true;
   }
@@ -519,15 +570,19 @@
       if (timed) d.ttl -= dt;
       if ((timed && d.ttl <= 0) || (DEPLOY[d.type].hp && d.hp <= 0)) { removeDeploy(d, !timed || d.ttl > 0); continue; }
       const owner = players.find(q => q.id === d.owner);
-      if (d.type === 'heal' && owner && owner.alive && dist2(owner.x, owner.y, d.x, d.y) < DEPLOY.heal.r ** 2) {
-        owner.healT += dt;
-        if (owner.healT >= 1.5 && owner.hp < owner.maxHp) { owner.healT = 0; owner.hp++; fx({ t: 'heal', p: owner.id, x: owner.x, y: owner.y }); }
+      if (d.type === 'heal') {
+        // Heals its owner and their teammates
+        for (const q of players) {
+          if (!q.alive || !friendly(q.id, d.owner) || dist2(q.x, q.y, d.x, d.y) >= DEPLOY.heal.r ** 2) continue;
+          q.healT += dt;
+          if (q.healT >= 1.5 && q.hp < q.maxHp) { q.healT = 0; q.hp++; fx({ t: 'heal', p: q.id, x: q.x, y: q.y }); }
+        }
       }
       if (d.type === 'turret' && owner) {
         d.cool -= dt;
         let best = null, bestD = DEPLOY.turret.range ** 2;
         for (const o of players) {
-          if (o === owner || !o.alive || o.shield > 0) continue;
+          if (friendly(o.id, d.owner) || !o.alive || o.shield > 0) continue;
           const dd = dist2(d.x, d.y, o.x, o.y);
           if (dd > bestD || (inBush(o) && dd > 110 * 110) || !lineOfSight(d.x, d.y, o.x, o.y, d.owner)) continue;
           best = o; bestD = dd;
@@ -562,6 +617,61 @@
     }
   }
 
+  // ---------- Teams ----------
+  // Two real players can agree to be a team: their paint passes through each other. Any player
+  // can be on teams with several others (each pair agrees separately). Leaving takes 3 seconds,
+  // so nobody can turn on a teammate without warning. The host's device keeps the official list.
+  const TEAM_ASK_TIME = 20, TEAM_BREAK_TIME = 3;
+  let alliances = {};   // "a|b" -> { breakT } (breakT > 0: leaving, counting down)
+  let requests = {};    // "from>to" -> seconds left to answer
+  const pairKey = (a, b) => (a < b ? a + '|' + b : b + '|' + a);
+  const allied = (a, b) => a !== b && !!alliances[pairKey(a, b)];
+  const friendly = (a, b) => a === b || allied(a, b);
+
+  function teamAction(fromId, act, withId) {
+    const a = players.find(q => q.id === fromId), b = players.find(q => q.id === withId);
+    if (!a || !b || a === b || a.isBot || b.isBot) return;
+    const k = pairKey(a.id, b.id), names = { a: a.id, b: b.id, an: a.name, bn: b.name };
+    if (act === 'ask') {
+      if (alliances[k]) return;
+      if (requests[b.id + '>' + a.id]) return teamAction(a.id, 'accept', b.id); // they already asked you
+      requests[a.id + '>' + b.id] = TEAM_ASK_TIME;
+      fx({ t: 'team', e: 'ask', ...names });
+    } else if (act === 'accept' && requests[b.id + '>' + a.id]) {
+      delete requests[b.id + '>' + a.id];
+      alliances[k] = { breakT: 0 };
+      fx({ t: 'team', e: 'join', ...names });
+    } else if (act === 'decline' && requests[b.id + '>' + a.id]) {
+      delete requests[b.id + '>' + a.id];
+      fx({ t: 'team', e: 'no', ...names });
+    } else if (act === 'cancel') {
+      delete requests[a.id + '>' + b.id];
+    } else if (act === 'break' && alliances[k] && !alliances[k].breakT) {
+      alliances[k].breakT = TEAM_BREAK_TIME;
+      fx({ t: 'team', e: 'leaving', ...names });
+    }
+  }
+  function updateTeams(dt) {
+    for (const k of Object.keys(requests)) if ((requests[k] -= dt) <= 0) delete requests[k];
+    for (const [k, v] of Object.entries(alliances)) {
+      if (v.breakT > 0 && (v.breakT -= dt) <= 0) {
+        delete alliances[k];
+        const [a, b] = k.split('|').map(id => players.find(q => q.id === id));
+        if (a && b) fx({ t: 'team', e: 'over', a: a.id, b: b.id, an: a.name, bn: b.name });
+      }
+    }
+  }
+  function dropTeamsOf(id) {
+    for (const k of Object.keys(alliances)) if (k.split('|').includes(id)) delete alliances[k];
+    for (const k of Object.keys(requests)) if (k.split('>').includes(id)) delete requests[k];
+  }
+  // Your own clicks: the host acts directly, a friend sends it to the host
+  function requestTeam(act, withId) {
+    if (!me) return;
+    if (mode === 'host') teamAction(me.id, act, withId);
+    else if (mode === 'client' && hostConn && hostConn.open) { try { hostConn.send({ t: 'team', act, with: withId }); } catch (e) { /* dropped */ } }
+  }
+
   // Every visible effect is an event. Solo and host apply it here; the host also sends it to
   // everyone else, whose screens apply the same event.
   let outbox = [];
@@ -575,6 +685,18 @@
     else if (e.t === 'bu') burst(e.x, e.y, e.c, e.n, e.v);
     else if (e.t === 'imp') { splat(e.x, e.y, e.c, 8); burst(e.x, e.y, e.c, 5, 120); }
     else if (e.t === 'msg') addFeed(e.s, false);
+    else if (e.t === 'team') {
+      const mine = e.a === myId || e.b === myId, other = e.a === myId ? e.bn : e.an;
+      if (e.e === 'ask' && e.a === myId) addFeed(`Asked ${e.bn} to team up`, true);
+      else if (e.e === 'no' && e.b === myId) addFeed(`${e.an} said no thanks`, true);
+      else if (e.e === 'join') {
+        addFeed(`${e.an} and ${e.bn} teamed up 🤝`, mine);
+        if (mine) { banner = { text: `🤝 You and ${other} are a team!`, sub: "Your paint can't hurt each other", t: 2.6, color: '#3dff8b' }; sound('pick'); }
+      } else if (e.e === 'leaving') {
+        addFeed(`${e.an} is leaving the team with ${e.bn}`, mine);
+        if (mine) banner = { text: `Team with ${other} ends in ${TEAM_BREAK_TIME}…`, sub: 'Get to cover!', t: TEAM_BREAK_TIME, color: '#ff8a3d' };
+      } else if (e.e === 'over') addFeed(`${e.an} and ${e.bn} are no longer a team`, mine);
+    }
     else if (e.t === 'dep') {
       const pu = POWERUPS[e.k];
       if (pu) burst(e.x, e.y, pu.color, 18, 200);
@@ -714,6 +836,9 @@
     const n = ['Digit1', 'Digit2', 'Digit3', 'Numpad1', 'Numpad2', 'Numpad3'].indexOf(e.code) % 3;
     if (n >= 0 && e.code.length && me && me.alive && !e.repeat) requestUse(n);
     if (e.code === 'Tab' && running) { e.preventDefault(); cycleSel(1); }
+    if (e.code === 'KeyT' && running && mode !== 'solo' && !e.repeat) toggleTeamPanel();
+    if (e.code === 'Escape') teamPanel.hidden = true;
+    if ((e.code === 'KeyY' || e.code === 'KeyN') && running && !e.repeat) answerTeam(e.code === 'KeyY');
   });
   window.addEventListener('keyup', e => { keys[e.code] = false; });
   window.addEventListener('blur', () => { for (const k in keys) keys[k] = false; mouseDown = false; sticks.move = sticks.aim = null; });
@@ -794,7 +919,7 @@
   function aimAssist(p, a) {
     let best = a, bestDiff = 0.3;
     for (const o of players) {
-      if (o === p || !o.alive || dist2(p.x, p.y, o.x, o.y) > 600 * 600) continue;
+      if (friendly(o.id, p.id) || !o.alive || dist2(p.x, p.y, o.x, o.y) > 600 * 600) continue;
       if (inBush(o) && dist2(p.x, p.y, o.x, o.y) > 110 * 110) continue;
       const oa = Math.atan2(o.y - p.y, o.x - p.x);
       const diff = Math.abs(Math.atan2(Math.sin(oa - a), Math.cos(oa - a)));
@@ -859,6 +984,7 @@
       for (const p of players.filter(q => q.awayUntil && now > q.awayUntil)) {
         players = players.filter(q => q !== p);
         removeDeploysOf(p.id);
+        dropTeamsOf(p.id);
         fx({ t: 'msg', s: `${p.name} left the game` });
         rebalanceBots();
       }
@@ -909,6 +1035,7 @@
 
     updateDrops(dt);
     updateDeploys(dt);
+    if (mode === 'host') updateTeams(dt);
 
     // Paintballs
     for (let i = balls.length - 1; i >= 0; i--) {
@@ -937,12 +1064,12 @@
       if (!dead) {
         // Shield domes stop enemy paint at the edge; paint already inside, or the owner's, passes
         for (const d of deploys) {
-          if (d.type === 'dome' && d.owner !== bl.owner.id &&
+          if (d.type === 'dome' && !friendly(d.owner, bl.owner.id) &&
               dist2(bl.x, bl.y, d.x, d.y) < DEPLOY.dome.r ** 2 && dist2(ox, oy, d.x, d.y) >= DEPLOY.dome.r ** 2) {
             fx({ t: 'bu', x: bl.x, y: bl.y, c: '#7fd4ff', n: 8, v: 150 });
             dead = true; break;
           }
-          if (d.type === 'turret' && d.owner !== bl.owner.id && segCircle(ox, oy, bl.x, bl.y, d.x, d.y, 16 + BALL_R)) {
+          if (d.type === 'turret' && !friendly(d.owner, bl.owner.id) && segCircle(ox, oy, bl.x, bl.y, d.x, d.y, 16 + BALL_R)) {
             d.hp--;
             fx({ t: 'imp', x: bl.x, y: bl.y, c: bl.color });
             dead = true; break;
@@ -951,7 +1078,7 @@
       }
       if (!dead) {
         for (const p of players) {
-          if (!p.alive || p === bl.owner) continue;
+          if (!p.alive || friendly(p.id, bl.owner.id)) continue; // teammates' paint passes through
           if (segCircle(ox, oy, bl.x, bl.y, p.x, p.y, PLAYER_R + BALL_R)) {
             hitPlayer(p, bl);
             dead = true; break;
@@ -1073,6 +1200,8 @@
         rebalanceBots();
         conn.send({ t: 'welcome', id: p.id, seed: mapSeed, code: roomCode });
         fx({ t: 'msg', s: `${p.name} joined the game` });
+      } else if (m.t === 'team' && conn.player && ['ask', 'accept', 'decline', 'cancel', 'break'].includes(m.act)) {
+        teamAction(conn.player.id, m.act, String(m.with));
       } else if (m.t === 'in' && conn.player) {
         conn.player.inp = {
           x: clamp(num(m.x), 0, WORLD), y: clamp(num(m.y), 0, WORLD),
@@ -1091,6 +1220,7 @@
       conn.player.alive = false;
       players = players.filter(p => p !== conn.player);
       removeDeploysOf(conn.player.id);
+      dropTeamsOf(conn.player.id);
       fx({ t: 'msg', s: `${conn.player.name} left the game` });
       rebalanceBots();
     }
@@ -1130,6 +1260,7 @@
       d: drops.map(d => [d.id, Math.round(d.x), Math.round(d.y), d.type, Math.round(d.ttl * 10) / 10]),
       dp: deploys.map(d => [d.id, d.type, d.owner, d.color, Math.round(d.x), Math.round(d.y), d.w || 0, d.h || 0, r1(d.ttl), d.hp, Math.round(d.aim * 100) / 100]),
       fx: outbox,
+      tm: { al: Object.entries(alliances).map(([k, v]) => [k, r1(v.breakT)]), rq: Object.keys(requests) },
     };
     outbox = [];
     for (const c of conns) if (c.open !== false) { try { c.send(msg); } catch (e) { /* dropped connection */ } }
@@ -1220,6 +1351,11 @@
     players = players.filter(p => seen.has(p.id));
     balls = m.b.map(([x, y, vx, vy, c]) => ({ x, y, vx, vy, color: c }));
     if (Array.isArray(m.d)) drops = m.d.filter(d => POWERUPS[d[3]]).map(([id, x, y, type, ttl]) => ({ id, x, y, type, ttl }));
+    if (m.tm && Array.isArray(m.tm.al) && Array.isArray(m.tm.rq)) {
+      alliances = {}; requests = {};
+      for (const [k, breakT] of m.tm.al) if (typeof k === 'string') alliances[k] = { breakT: num(breakT) };
+      for (const k of m.tm.rq) if (typeof k === 'string') requests[k] = 1;
+    }
     if (Array.isArray(m.dp)) {
       deploys = m.dp.filter(d => DEPLOY[d[1]]).map(([id, type, owner, color, x, y, w, h, ttl, hp, aim]) => ({ id, type, owner, color, x, y, w, h, ttl, hp, aim }));
       rebuildRects(); // so you bump into a friend's barricade on your own screen too
@@ -1318,7 +1454,7 @@
     return {
       f: SAVE_FORMAT, at: Date.now(), mode, roomCode, mapSeed, nextId, dropId, myId: me.id, camX, camY,
       players: players.map(p => Object.fromEntries(SAVED_FIELDS.map(k => [k, p[k]]))),
-      drops, deploys, deployId, feed, paint: paintData(),
+      drops, deploys, deployId, feed, alliances, requests, paint: paintData(),
     };
   }
   function saveAndReload() {
@@ -1348,6 +1484,7 @@
       balls = []; particles = []; rings = []; popups = []; outbox = []; banner = null;
       drops = Array.isArray(sv.drops) ? sv.drops : [];
       deploys = Array.isArray(sv.deploys) ? sv.deploys : []; deployId = sv.deployId || 0;
+      alliances = sv.alliances || {}; requests = sv.requests || {};
       rebuildRects();
       feed = Array.isArray(sv.feed) ? sv.feed : [];
       camX = sv.camX; camY = sv.camY;
@@ -1401,6 +1538,12 @@
     ctx.fillRect(6, -8, 5, 16);
     ctx.restore();
 
+    if (me && allied(me.id, p.id)) {
+      // Teammate: green dashed ring (orange while the team is ending)
+      const leaving = alliances[pairKey(me.id, p.id)].breakT > 0;
+      ctx.strokeStyle = leaving ? '#ff8a3d' : '#3dff8b'; ctx.lineWidth = 3; ctx.setLineDash([6, 5]);
+      ctx.beginPath(); ctx.arc(0, 0, PLAYER_R + 6, 0, Math.PI * 2); ctx.stroke(); ctx.setLineDash([]);
+    }
     if (p.buffs.speed && Math.hypot(p.vx, p.vy) > 50) {
       ctx.globalAlpha = 0.5; ctx.strokeStyle = '#3dfff0'; ctx.lineWidth = 3;
       const a = Math.atan2(p.vy, p.vx) + Math.PI;
@@ -1424,9 +1567,11 @@
     ctx.globalAlpha = hidden ? 0.6 : 1;
     ctx.font = 'bold 13px system-ui'; ctx.textAlign = 'center';
     ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(0,0,0,.6)';
-    ctx.fillStyle = !p.isBot && p !== me ? '#ffe066' : '#fff'; // friends' names in yellow
-    ctx.strokeText(p.name, p.x, p.y - PLAYER_R - 16);
-    ctx.fillText(p.name, p.x, p.y - PLAYER_R - 16);
+    const mate = me && allied(me.id, p.id);
+    ctx.fillStyle = mate ? '#3dff8b' : !p.isBot && p !== me ? '#ffe066' : '#fff'; // teammates green, other friends yellow
+    const label = mate ? '🤝 ' + p.name : p.name;
+    ctx.strokeText(label, p.x, p.y - PLAYER_R - 16);
+    ctx.fillText(label, p.x, p.y - PLAYER_R - 16);
     for (let i = 0; i < p.maxHp; i++) {
       ctx.fillStyle = i < p.hp ? '#ff4d6d' : 'rgba(0,0,0,.35)';
       ctx.beginPath(); ctx.arc(p.x + (i - (p.maxHp - 1) / 2) * 11, p.y - PLAYER_R - 6, 4, 0, Math.PI * 2); ctx.fill();
@@ -1745,6 +1890,11 @@
       ctx.fillStyle = POWERUPS[d.type].color;
       ctx.beginPath(); ctx.arc(mx0 + d.x * s, my0 + d.y * s, 2.5, 0, Math.PI * 2); ctx.fill();
     }
+    for (const q of players) {
+      if (!q.alive || !allied(me.id, q.id)) continue; // teammates show on your minimap
+      ctx.fillStyle = '#3dff8b'; ctx.strokeStyle = '#102a17'; ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.arc(mx0 + q.x * s, my0 + q.y * s, 3.5, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+    }
     if (me.alive) {
       ctx.fillStyle = me.color; ctx.strokeStyle = '#fff'; ctx.lineWidth = 2;
       ctx.beginPath(); ctx.arc(mx0 + me.x * s, my0 + me.y * s, 4, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
@@ -1775,10 +1925,13 @@
       ctx.textAlign = 'center';
       ctx.font = compact ? '900 22px system-ui' : '900 30px system-ui';
       ctx.lineWidth = 6; ctx.strokeStyle = 'rgba(0,0,0,.7)';
-      ctx.strokeText(banner.text, W / 2, 110); ctx.fillStyle = banner.color || me.color; ctx.fillText(banner.text, W / 2, 110);
+      // Sit below the buttons at the top (Teams, team requests, Update) whatever is showing
+      const stackBottom = document.getElementById('topstack').getBoundingClientRect().bottom;
+      const bY = Math.max(110, stackBottom + 32);
+      ctx.strokeText(banner.text, W / 2, bY); ctx.fillStyle = banner.color || me.color; ctx.fillText(banner.text, W / 2, bY);
       if (banner.sub) {
         ctx.font = 'bold 18px system-ui';
-        ctx.strokeText(banner.sub, W / 2, 138); ctx.fillStyle = '#fff'; ctx.fillText(banner.sub, W / 2, 138);
+        ctx.strokeText(banner.sub, W / 2, bY + 28); ctx.fillStyle = '#fff'; ctx.fillText(banner.sub, W / 2, bY + 28);
       }
       ctx.globalAlpha = 1;
     }
@@ -1845,6 +1998,64 @@
     }
   }
 
+  // ---------- Teams UI ----------
+  const teamBtn = document.getElementById('teamBtn'), teamPanel = document.getElementById('teamPanel');
+  const teamList = document.getElementById('teamList'), teamAsk = document.getElementById('teamAsk');
+  let teamSig = '';
+  function toggleTeamPanel() { teamPanel.hidden = !teamPanel.hidden; teamSig = ''; }
+  teamBtn.onclick = toggleTeamPanel;
+  document.getElementById('teamClose').onclick = () => { teamPanel.hidden = true; };
+  teamPanel.addEventListener('click', e => { if (e.target === teamPanel) teamPanel.hidden = true; });
+  // The oldest request someone sent you, if any
+  function incomingAsk() {
+    if (!me) return null;
+    const k = Object.keys(requests).find(k => k.endsWith('>' + me.id));
+    return k ? players.find(q => q.id === k.split('>')[0]) || null : null;
+  }
+  function answerTeam(yes) {
+    const from = incomingAsk();
+    if (from) requestTeam(yes ? 'accept' : 'decline', from.id);
+  }
+  document.getElementById('teamYes').onclick = () => answerTeam(true);
+  document.getElementById('teamNo').onclick = () => answerTeam(false);
+
+  function refreshTeamsUI() {
+    const show = running && mode !== 'solo' && !!me;
+    const others = show ? players.filter(q => !q.isBot && q !== me) : [];
+    const ask = show ? incomingAsk() : null;
+    const sig = [show, teamPanel.hidden, ask && ask.id, others.map(q => q.id + q.name + q.color).join(),
+      JSON.stringify(Object.entries(alliances).map(([k, v]) => [k, Math.ceil(v.breakT)])), Object.keys(requests).join()].join('~');
+    if (sig === teamSig) return;
+    teamSig = sig;
+    teamBtn.hidden = !show;
+    if (!show) { teamPanel.hidden = true; teamAsk.hidden = true; return; }
+    teamBtn.classList.toggle('ping', !!ask);
+    teamAsk.hidden = !ask;
+    if (ask) document.getElementById('teamAskText').textContent = `${ask.name} wants to team up`;
+    if (teamPanel.hidden) return;
+    teamList.textContent = '';
+    if (!others.length) {
+      const li = document.createElement('li'); li.className = 'empty';
+      li.textContent = 'No other players yet. Share the room code so friends can join.';
+      teamList.appendChild(li);
+    }
+    for (const q of others) {
+      const li = document.createElement('li');
+      const dot = document.createElement('span'); dot.className = 'dot'; dot.style.background = q.color;
+      const nm = document.createElement('span'); nm.className = 'nm'; nm.textContent = q.name;
+      li.append(dot, nm);
+      const al = alliances[pairKey(me.id, q.id)];
+      const btn = (text, cls, act) => { const b = document.createElement('button'); b.textContent = text; b.className = cls; b.onclick = () => requestTeam(act, q.id); li.appendChild(b); };
+      const note = (text) => { const st = document.createElement('span'); st.className = 'st'; st.textContent = text; li.appendChild(st); };
+      if (al && al.breakT > 0) note(`Leaving in ${Math.ceil(al.breakT)}…`);
+      else if (al) { note('🤝 Teammate'); btn('Leave team', 'quit', 'break'); }
+      else if (requests[q.id + '>' + me.id]) { btn('Accept', 'yes', 'accept'); btn('No', 'quit', 'decline'); }
+      else if (requests[me.id + '>' + q.id]) { note('Asked…'); btn('Cancel', 'quit', 'cancel'); }
+      else btn('Team up', 'go', 'ask');
+      teamList.appendChild(li);
+    }
+  }
+
   // ---------- Game loop / menu ----------
   const autoRespawn = true;
   let running = false;
@@ -1854,6 +2065,7 @@
     last = now;
     if (running) update(dt);
     if (running && mode === 'host') sendSnapshots(dt);
+    refreshTeamsUI();
     render();
     requestAnimationFrame(frame);
   }
@@ -1876,6 +2088,7 @@
     buildMap(mapSeed);
     pctx.clearRect(0, 0, paint.width, paint.height);
     players = []; balls = []; particles = []; feed = []; rings = []; popups = []; banner = null; outbox = []; drops = []; deploys = []; rebuildRects();
+    alliances = {}; requests = {};
     me = makePlayer(name, chosen, false, mode === 'client' ? opts.id : 'h');
     players.push(me);
     if (mode === 'client') {
