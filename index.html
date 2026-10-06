@@ -106,6 +106,36 @@
   #teamList .empty { color: #777; font-size: 14px; }
   #teamList .tag { font-size: 11px; color: #777; border: 1px solid #ccc; border-radius: 4px; padding: 0 5px; }
   #update:disabled { cursor: default; opacity: .85; }
+  #lobby { position: fixed; inset: 0; z-index: 15; display: flex; align-items: center; justify-content: center; background: rgba(10, 20, 12, 0.75); overflow-y: auto; }
+  .lcard { background: #fff; color: #222; border-radius: 16px; padding: 18px 20px; width: min(420px, calc(100vw - 32px)); margin: 16px 0;
+    box-shadow: 0 10px 40px rgba(0,0,0,.4); display: flex; flex-direction: column; gap: 12px; }
+  .lhead { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+  .lroom { font-size: 22px; font-weight: 800; }
+  .lroom b { letter-spacing: .12em; color: #ff3d7f; }
+  .lsub { font-size: 13px; color: #666; }
+  .lleave { border: 0; background: #eee; border-radius: 8px; padding: 6px 12px; font: 700 13px system-ui, sans-serif; cursor: pointer; }
+  .lrow { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .llabel { width: 62px; font-weight: 700; font-size: 14px; }
+  .seg { display: flex; border: 2px solid #222; border-radius: 10px; overflow: hidden; }
+  .seg button { border: 0; background: #fff; padding: 7px 12px; font: 700 14px system-ui, sans-serif; cursor: pointer; }
+  .seg button + button { border-left: 2px solid #222; }
+  .seg button.on { background: #222; color: #fff; }
+  .step { display: flex; align-items: center; border: 2px solid #222; border-radius: 10px; overflow: hidden; }
+  .step button { border: 0; background: #fff; width: 34px; height: 34px; font: 700 18px system-ui, sans-serif; cursor: pointer; }
+  .step span { min-width: 34px; text-align: center; font: 800 16px system-ui, sans-serif; font-variant-numeric: tabular-nums; }
+  .lmix { font-size: 13px; color: #666; }
+  .lcard button:disabled { cursor: default; opacity: .55; }
+  #lPeople { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; max-height: 40vh; overflow-y: auto; }
+  #lPeople li { display: flex; align-items: center; gap: 8px; min-height: 34px; }
+  #lPeople .dot { width: 14px; height: 14px; border-radius: 50%; flex: none; }
+  #lPeople .nm { flex: 1; min-width: 0; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #lPeople .nm small { font-weight: 600; color: #888; }
+  .chips { display: flex; gap: 4px; }
+  .chips button { width: 30px; height: 26px; border-radius: 7px; border: 2px solid transparent; cursor: pointer; opacity: .35; }
+  .chips button.on { opacity: 1; border-color: #222; }
+  .lshuffle { align-self: flex-start; border: 2px solid #222; background: #fff; border-radius: 10px; padding: 6px 12px; font: 700 13px system-ui, sans-serif; cursor: pointer; }
+  #lStart { font-size: 20px; font-weight: 800; padding: 12px; border: 0; border-radius: 10px; background: #ff3d7f; color: #fff; cursor: pointer; }
+  #lWait { margin: 0; text-align: center; font-weight: 700; color: #555; }
   #netmsg { min-height: 18px; margin-top: 8px; font-size: 13px; color: #b8336a; font-weight: 600; }
   button:focus-visible, input:focus-visible { outline: 3px solid #3da5ff; outline-offset: 2px; }
 </style>
@@ -159,6 +189,29 @@
     <div id="rotate">Turn your phone sideways for the best view</div>
   </div>
 </div>
+<div id="lobby" hidden>
+  <div class="lcard">
+    <div class="lhead">
+      <div><div class="lroom">Room <b id="lCode"></b></div><div class="lsub">Friends join with this code</div></div>
+      <button id="lLeave" class="lleave">Leave</button>
+    </div>
+    <div class="lrow">
+      <span class="llabel">Teams</span>
+      <div class="seg" id="lTeams">
+        <button data-v="0">None</button><button data-v="2">2</button><button data-v="3">3</button><button data-v="4">4</button>
+      </div>
+    </div>
+    <div class="lrow">
+      <span class="llabel">Players</span>
+      <div class="step"><button id="lMinus" aria-label="Fewer players">−</button><span id="lTotal"></span><button id="lPlus" aria-label="More players">+</button></div>
+      <span class="lmix" id="lMix"></span>
+    </div>
+    <ul id="lPeople"></ul>
+    <button id="lShuffle" class="lshuffle">Shuffle teams</button>
+    <button id="lStart">START GAME</button>
+    <p id="lWait"></p>
+  </div>
+</div>
 <script>
 (() => {
   // ---------- Config ----------
@@ -209,7 +262,14 @@
     turret: { ttl: 0, hp: 5, range: 380, rate: 0.5 },
   };
   const BOT_NAMES = ['Splatty', 'Blobby', 'Drip', 'Smudge', 'Neon', 'Goober', 'Pellet', 'Squish', 'Rainbow', 'Sploosh', 'Zippy', 'Mango',
-    'Gloop', 'Speckle', 'Dribble', 'Fizz', 'Noodle', 'Puddle', 'Swirl', 'Bonk'];
+    'Gloop', 'Speckle', 'Dribble', 'Fizz', 'Noodle', 'Puddle', 'Swirl', 'Bonk', 'Wobble', 'Spritz', 'Jelly', 'Blotch', 'Squirt', 'Doodle'];
+  // Team games: everyone wears their team's color and spawns at their team's base
+  const TEAM_INFO = [
+    { name: 'Red', color: '#ff4d4d' }, { name: 'Blue', color: '#3da5ff' },
+    { name: 'Yellow', color: '#ffd23d' }, { name: 'Purple', color: '#b03dff' },
+  ];
+  const BASE_R = 260;              // how big a team's spawn area is
+  const MAX_PLAYERS = 24;          // people + bots in a hosted game
 
   const canvas = document.getElementById('c');
   const ctx = canvas.getContext('2d');
@@ -389,12 +449,28 @@
     return false;
   }
 
-  function freeSpot() {
+  // Team bases sit around the arena: 2 teams face off left/right, 3 in a triangle, 4 on all sides
+  function basePos(t) {
+    const a = Math.PI + t * Math.PI * 2 / teamMode, R = WORLD * 0.38;
+    return { x: WORLD / 2 + Math.cos(a) * R, y: WORLD / 2 + Math.sin(a) * R };
+  }
+  function freeSpot(who) {
+    const enemyNear = (x, y, d) => players.some(p => p.alive && p !== who && !(who && friendly(p.id, who.id)) && dist2(x, y, p.x, p.y) < d * d);
+    if (teamMode && who && who.team != null) {
+      // Somewhere in your team's base, away from any enemy who wandered in
+      const b = basePos(who.team);
+      for (let tries = 0; tries < 300; tries++) {
+        const reach = tries < 200 ? BASE_R : BASE_R * 2, a = rand(0, Math.PI * 2), d = Math.sqrt(Math.random()) * reach;
+        const x = clamp(b.x + Math.cos(a) * d, 60, WORLD - 60), y = clamp(b.y + Math.sin(a) * d, 60, WORLD - 60);
+        if (pointBlocked(x, y, PLAYER_R + 10) || enemyNear(x, y, 200)) continue;
+        return { x, y };
+      }
+    }
     for (let tries = 0; tries < 200; tries++) {
       const x = rand(60, WORLD - 60), y = rand(60, WORLD - 60);
       if (pointBlocked(x, y, PLAYER_R + 10)) continue;
       // Avoid spawning right next to an enemy
-      if (players.some(p => p.alive && dist2(x, y, p.x, p.y) < 350 * 350)) continue;
+      if (enemyNear(x, y, 350)) continue;
       return { x, y };
     }
     return { x: WORLD / 2, y: WORLD / 2 };
@@ -410,10 +486,13 @@
   // Game mode: 'solo' (just you and bots), 'host' (your device runs the world for everyone),
   // or 'client' (you joined someone else's game and your screen follows theirs)
   let mode = 'solo';
+  let teamMode = 0;                    // 0 = everyone for themselves, otherwise how many teams
+  let totalPlayers = NUM_BOTS + 1;     // people + bots; bots fill whatever people don't
+  let botNames = BOT_NAMES.slice();
 
   function makePlayer(name, color, isBot, id) {
     return {
-      id, name, color, isBot, remote: false, ss: 0,
+      id, name, color, isBot, remote: false, ss: 0, team: null,
       buffs: {}, magSize: MAG_SIZE, items: [], sel: 0, healT: 0,
       x: 0, y: 0, vx: 0, vy: 0, aim: 0,
       maxHp: isBot ? MAX_HP : PLAYER_HP,
@@ -427,7 +506,7 @@
   }
 
   function spawn(p) {
-    const s = freeSpot();
+    const s = freeSpot(p);
     p.x = s.x; p.y = s.y;
     p.buffs = {}; p.magSize = MAG_SIZE; p.items = []; p.sel = 0; p.maxHp = p.isBot ? MAX_HP : PLAYER_HP; // boosts end when you're splatted
     p.hp = p.maxHp; p.ammo = MAG_SIZE; p.reload = 0; p.cooldown = 0.3;
@@ -633,7 +712,9 @@
   const teamCount = (id) => Object.keys(alliances).filter(k => k.split('|').includes(id)).length;
   const pairKey = (a, b) => (a < b ? a + '|' + b : b + '|' + a);
   const allied = (a, b) => a !== b && !!alliances[pairKey(a, b)];
-  const friendly = (a, b) => a === b || allied(a, b);
+  const teamOf = (id) => { const p = players.find(q => q.id === id); return p ? p.team : null; };
+  const sameTeam = (a, b) => { if (!teamMode) return false; const t = teamOf(a); return t != null && t === teamOf(b); };
+  const friendly = (a, b) => a === b || sameTeam(a, b) || allied(a, b);
 
   function teamAction(fromId, act, withId, why) {
     const a = players.find(q => q.id === fromId), b = players.find(q => q.id === withId);
@@ -678,7 +759,7 @@
     }
 
     // Every so often a bot without a teammate asks someone nearby (usually another bot)
-    if ((botTeamT -= dt) <= 0) {
+    if (!teamMode && (botTeamT -= dt) <= 0) {
       botTeamT = rand(8, 16);
       const lonely = players.filter(q => q.isBot && q.alive && !q.target && teamCount(q.id) === 0);
       const bot = lonely[Math.floor(Math.random() * lonely.length)];
@@ -714,7 +795,7 @@
   }
   // Your own clicks: the host acts directly, a friend sends it to the host
   function requestTeam(act, withId) {
-    if (!me) return;
+    if (!me || teamMode) return;
     if (mode !== 'client') teamAction(me.id, act, withId);
     else if (mode === 'client' && hostConn && hostConn.open) { try { hostConn.send({ t: 'team', act, with: withId }); } catch (e) { /* dropped */ } }
   }
@@ -884,7 +965,7 @@
     const n = ['Digit1', 'Digit2', 'Digit3', 'Numpad1', 'Numpad2', 'Numpad3'].indexOf(e.code) % 3;
     if (n >= 0 && e.code.length && me && me.alive && !e.repeat) requestUse(n);
     if (e.code === 'Tab' && running) { e.preventDefault(); cycleSel(1); }
-    if (e.code === 'KeyT' && running && !e.repeat) toggleTeamPanel();
+    if (e.code === 'KeyT' && running && !teamMode && !e.repeat) toggleTeamPanel();
     if (e.code === 'Escape') teamPanel.hidden = true;
     if ((e.code === 'KeyY' || e.code === 'KeyN') && running && !e.repeat) answerTeam(e.code === 'KeyY');
   });
@@ -1177,6 +1258,7 @@
   }
   function netFail(text) {
     stopNet();
+    hideLobby();
     if (running && mode !== 'solo') endGame(text); else netMsg(text);
   }
   const NO_SERVER = "Couldn't reach the multiplayer service. Check your internet, or if you're playing inside Claude, use the GitHub Pages version.";
@@ -1201,7 +1283,7 @@
       if (peer !== pr) return;
       connecting = false;
       roomCode = code;
-      if (!reopen) startGame('host');
+      if (!reopen) openLobby();
     });
     pr.on('connection', setupHostConn);
     pr.on('error', err => {
@@ -1235,10 +1317,23 @@
         if (back) {
           back.awayUntil = 0; back.shield = SPAWN_SHIELD; back.inp = null;
           conn.player = back;
-          conn.send({ t: 'welcome', id: back.id, seed: mapSeed, code: roomCode });
+          conn.send({ t: 'welcome', id: back.id, seed: mapSeed, code: roomCode, teams: teamMode });
           fx({ t: 'msg', s: `${back.name} is back` });
           return;
         }
+        if (!running && lobby) {
+          // Still in the lobby: add them to the list (the host sorts out teams, then starts)
+          if (lobby.people.length >= MAX_HUMANS) { conn.send({ t: 'full' }); setTimeout(() => conn.close(), 500); return; }
+          let color = cleanColor(m.color);
+          const taken = lobby.people.map(q => q.color);
+          if (taken.includes(color)) color = COLORS.find(c => !taken.includes(c)) || color;
+          conn.lobbyId = 'p' + (++nextId);
+          lobby.people.push({ id: conn.lobbyId, name: cleanName(m.name), color, team: lobby.teams ? smallestLobbyTeam() : null });
+          lobby.total = Math.max(lobby.total, lobby.people.length);
+          broadcastLobby();
+          return;
+        }
+        if (!running) return;
         if (players.filter(p => !p.isBot).length >= MAX_HUMANS) { conn.send({ t: 'full' }); setTimeout(() => conn.close(), 500); return; }
         // Two people with the same color is confusing, so swap to a free one if needed
         let color = cleanColor(m.color);
@@ -1246,11 +1341,12 @@
         if (taken.includes(color)) color = COLORS.find(c => !taken.includes(c)) || color;
         const p = makePlayer(cleanName(m.name), color, false, 'p' + (++nextId));
         p.remote = true; p.maxHp = PLAYER_HP;
+        if (teamMode) { p.team = teamForNewcomer(); p.color = TEAM_INFO[p.team].color; }
         conn.player = p;
         players.push(p);
         spawn(p);
         rebalanceBots();
-        conn.send({ t: 'welcome', id: p.id, seed: mapSeed, code: roomCode });
+        conn.send({ t: 'welcome', id: p.id, seed: mapSeed, code: roomCode, teams: teamMode });
         fx({ t: 'msg', s: `${p.name} joined the game` });
       } else if (m.t === 'team' && conn.player && ['ask', 'accept', 'decline', 'cancel', 'break'].includes(m.act)) {
         teamAction(conn.player.id, m.act, String(m.with));
@@ -1268,6 +1364,10 @@
   function dropConn(conn) {
     if (!conns.includes(conn)) return;
     conns = conns.filter(c => c !== conn);
+    if (conn.lobbyId && lobby) {
+      lobby.people = lobby.people.filter(q => q.id !== conn.lobbyId);
+      broadcastLobby();
+    }
     if (conn.player && mode === 'host' && !updating) { // during an update, friends drop off on purpose
       conn.player.alive = false;
       players = players.filter(p => p !== conn.player);
@@ -1278,25 +1378,41 @@
     }
   }
 
-  // Fewer bots as more friends join, so the arena doesn't get too crowded
+  // Bots fill the game up to the chosen number of players; in a team game, evenly across teams
   function rebalanceBots() {
-    const humans = players.filter(p => !p.isBot).length;
-    const want = Math.max(8, NUM_BOTS - (humans - 1));
-    let bots = players.filter(p => p.isBot);
-    while (bots.length > want) {
-      const b = bots.pop();
+    const removeBot = (b) => {
       b.alive = false;
       players = players.filter(p => p !== b);
       removeDeploysOf(b.id);
       dropTeamsOf(b.id);
+    };
+    const addBot = (team) => {
+      const used = new Set(players.map(p => p.name));
+      const name = botNames.find(n => !used.has(n)) || 'Bot';
+      const color = team != null ? TEAM_INFO[team].color : COLORS[(players.length + 3) % COLORS.length];
+      const b = makePlayer(name, color, true, 'b' + (++nextId));
+      b.team = team;
+      players.push(b); spawn(b);
+    };
+    const groups = teamMode ? [...Array(teamMode).keys()] : [null];
+    groups.forEach((t, i) => {
+      // Each team's share of the total (the first teams get any leftover spot)
+      const size = teamMode ? Math.floor(totalPlayers / teamMode) + (i < totalPlayers % teamMode ? 1 : 0) : totalPlayers;
+      const humans = players.filter(p => !p.isBot && p.team === t).length;
+      const bots = players.filter(p => p.isBot && p.team === t);
+      const want = Math.max(0, size - humans);
+      while (bots.length > want) removeBot(bots.pop());
+      for (let n = bots.length; n < want; n++) addBot(t);
+    });
+  }
+  // A friend who joins mid-game goes to the team with the fewest people
+  function teamForNewcomer() {
+    let best = 0;
+    for (let t = 1; t < teamMode; t++) {
+      const count = (k, bot) => players.filter(p => p.team === k && (bot === undefined || p.isBot === bot)).length;
+      if (count(t, false) < count(best, false) || (count(t, false) === count(best, false) && count(t) < count(best))) best = t;
     }
-    const used = new Set(players.map(p => p.name));
-    while (bots.length < want) {
-      const name = BOT_NAMES.find(n => !used.has(n)) || 'Bot';
-      used.add(name);
-      const b = makePlayer(name, COLORS[(bots.length + 3) % COLORS.length], true, 'b' + (++nextId));
-      players.push(b); spawn(b); bots.push(b);
-    }
+    return best;
   }
 
   function sendSnapshots(dt) {
@@ -1308,7 +1424,7 @@
       t: 's',
       p: players.map(p => [p.id, p.name, p.color, p.isBot ? 1 : 0, Math.round(p.x), Math.round(p.y), Math.round(p.aim * 100) / 100,
         p.hp, p.maxHp, p.alive ? 1 : 0, r1(p.respawn), r1(p.shield), p.kills, p.deaths, p.streak, p.ammo, r1(p.reload), p.ss,
-        Math.round(p.vx), Math.round(p.vy), p.buffs, p.magSize, p.items]),
+        Math.round(p.vx), Math.round(p.vy), p.buffs, p.magSize, p.items, p.team]),
       b: balls.map(b => [Math.round(b.x), Math.round(b.y), Math.round(b.vx), Math.round(b.vy), b.color]),
       d: drops.map(d => [d.id, Math.round(d.x), Math.round(d.y), d.type, Math.round(d.ttl * 10) / 10]),
       dp: deploys.map(d => [d.id, d.type, d.owner, d.color, Math.round(d.x), Math.round(d.y), d.w || 0, d.h || 0, r1(d.ttl), d.hp, Math.round(d.aim * 100) / 100]),
@@ -1343,12 +1459,18 @@
       conn.on('open', () => conn.send({ t: 'hello', name: document.getElementById('name').value.trim() || 'Friend', color: chosen, v: pageVersion, rejoin: rejoin && rejoin.id }));
       conn.on('data', m => {
         if (!m || typeof m !== 'object' || peer !== pr) return;
-        if (m.t === 'welcome' && !running) {
+        if (m.t === 'lobby' && !running && Array.isArray(m.people)) {
+          clearTimeout(timer);
+          connecting = false;
+          roomCode = code;
+          clientLobby = m;
+          showLobby();
+        } else if (m.t === 'welcome' && !running) {
           clearTimeout(timer);
           connecting = false;
           roomCode = code;
           lastSnap = performance.now();
-          startGame('client', { seed: num(m.seed, 1), id: String(m.id) });
+          startGame('client', { seed: num(m.seed, 1), id: String(m.id), teams: clamp(num(m.teams), 0, 4) | 0 });
           if (rejoin && rejoin.paint) restorePaint(rejoin.paint);
         } else if (m.t === 'update') {
           // The host is updating everyone: save who we are and reload with them
@@ -1385,10 +1507,11 @@
     if (!Array.isArray(m.p) || !Array.isArray(m.b)) return;
     const seen = new Set();
     for (const a of m.p) {
-      const [id, name, color, bot, x, y, aim, hp, maxHp, alive, respawn, shield, kills, deaths, streak, ammo, reload, ss, vx, vy, buffs, magSize, items] = a;
+      const [id, name, color, bot, x, y, aim, hp, maxHp, alive, respawn, shield, kills, deaths, streak, ammo, reload, ss, vx, vy, buffs, magSize, items, team] = a;
       seen.add(id);
       let p = players.find(q => q.id === id);
       if (!p) { p = makePlayer(name, color, !!bot, id); p.x = p.tx = x; p.y = p.ty = y; players.push(p); }
+      p.team = Number.isInteger(team) && team >= 0 && team < 4 ? team : null;
       Object.assign(p, { name, color, hp, maxHp, alive: !!alive, respawn, shield, kills, deaths, streak,
         buffs: buffs && typeof buffs === 'object' ? buffs : {}, magSize: num(magSize, MAG_SIZE),
         items: Array.isArray(items) ? items.filter(k => DEPLOY[k]).slice(0, MAX_CARRY) : [] });
@@ -1501,11 +1624,11 @@
       try { save.paint = null; sessionStorage.setItem(SAVE_KEY, JSON.stringify(save)); } catch (e2) { /* can't save */ }
     }
   }
-  const SAVED_FIELDS = ['id', 'name', 'color', 'isBot', 'remote', 'ss', 'buffs', 'magSize', 'items', 'sel', 'x', 'y', 'aim', 'maxHp', 'hp',
+  const SAVED_FIELDS = ['id', 'name', 'color', 'isBot', 'remote', 'ss', 'buffs', 'magSize', 'items', 'sel', 'team', 'x', 'y', 'aim', 'maxHp', 'hp',
     'ammo', 'reload', 'cooldown', 'stamina', 'alive', 'respawn', 'shield', 'kills', 'deaths', 'streak', 'wanderA', 'strafe'];
   function serializeGame() {
     return {
-      f: SAVE_FORMAT, at: Date.now(), mode, roomCode, mapSeed, nextId, dropId, myId: me.id, camX, camY,
+      f: SAVE_FORMAT, at: Date.now(), mode, roomCode, mapSeed, nextId, dropId, myId: me.id, camX, camY, teamMode, totalPlayers, botNames,
       players: players.map(p => Object.fromEntries(SAVED_FIELDS.map(k => [k, p[k]]))),
       drops, deploys, deployId, feed, alliances, requests, paint: paintData(),
     };
@@ -1528,6 +1651,8 @@
       const mine = restored.find(p => p.id === sv.myId);
       if (!mine) return false;
       mode = sv.mode; mapSeed = sv.mapSeed; nextId = sv.nextId; dropId = sv.dropId;
+      teamMode = sv.teamMode || 0; totalPlayers = sv.totalPlayers || NUM_BOTS + 1;
+      if (Array.isArray(sv.botNames)) botNames = sv.botNames;
       buildMap(mapSeed);
       pctx.clearRect(0, 0, paint.width, paint.height);
       restorePaint(sv.paint);
@@ -1620,7 +1745,7 @@
     ctx.globalAlpha = hidden ? 0.6 : 1;
     ctx.font = 'bold 13px system-ui'; ctx.textAlign = 'center';
     ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(0,0,0,.6)';
-    const mate = me && allied(me.id, p.id);
+    const mate = me && p !== me && friendly(me.id, p.id);
     ctx.fillStyle = mate ? '#3dff8b' : !p.isBot && p !== me ? '#ffe066' : '#fff'; // teammates green, other friends yellow
     const label = mate ? '🤝 ' + p.name : p.name;
     ctx.strokeText(label, p.x, p.y - PLAYER_R - 16);
@@ -1667,6 +1792,20 @@
       if (pw > 0 && ph > 0) ctx.drawImage(paint, px * PAINT_SCALE, py * PAINT_SCALE, pw * PAINT_SCALE, ph * PAINT_SCALE, px, py, pw, ph);
     }
     ctx.strokeStyle = '#2b4427'; ctx.lineWidth = 8; ctx.strokeRect(-4, -4, WORLD + 8, WORLD + 8);
+
+    // Team bases
+    for (let t = 0; t < teamMode; t++) {
+      const b = basePos(t), info = TEAM_INFO[t];
+      if (!seen(b.x - BASE_R, b.y - BASE_R, BASE_R * 2, BASE_R * 2)) continue;
+      ctx.save();
+      ctx.globalAlpha = 0.14; ctx.fillStyle = info.color;
+      ctx.beginPath(); ctx.arc(b.x, b.y, BASE_R, 0, Math.PI * 2); ctx.fill();
+      ctx.globalAlpha = 0.6; ctx.strokeStyle = info.color; ctx.lineWidth = 6; ctx.setLineDash([24, 16]);
+      ctx.stroke(); ctx.setLineDash([]);
+      ctx.globalAlpha = 0.35; ctx.fillStyle = info.color; ctx.font = '900 44px system-ui'; ctx.textAlign = 'center';
+      ctx.fillText(info.name.toUpperCase() + ' BASE', b.x, b.y + 16);
+      ctx.restore();
+    }
 
     // Obstacles (shadow, then body)
     const vRects = rects.filter(r => seen(r.x, r.y, r.w + 6, r.h + 6));
@@ -1859,6 +1998,21 @@
       ctx.textAlign = 'right';
       ctx.fillText(p.kills, W - 22, y);
     });
+    // Team totals, under the leaderboard
+    if (teamMode) {
+      const y0 = 12 + 30 + rowH * rows.length + 8;
+      const scores = TEAM_INFO.slice(0, teamMode).map((info, t) => ({ info, t, k: players.filter(p => p.team === t).reduce((a, p) => a + p.kills, 0) }))
+        .sort((a, b) => b.k - a.k);
+      ctx.fillStyle = 'rgba(0,0,0,.45)'; ctx.fillRect(W - lbW - 12, y0, lbW, 10 + rowH * teamMode);
+      ctx.font = 'bold 13px system-ui';
+      scores.forEach(({ info, t, k }, i) => {
+        const y = y0 + 22 + i * rowH;
+        ctx.fillStyle = info.color; ctx.fillRect(W - lbW - 2, y - 10, 12, 12);
+        ctx.textAlign = 'left'; ctx.fillStyle = me && me.team === t ? '#ffe066' : '#fff';
+        ctx.fillText(`Team ${info.name}${me && me.team === t ? ' (you)' : ''}`, W - lbW + 16, y);
+        ctx.textAlign = 'right'; ctx.fillText(k, W - 22, y);
+      });
+    }
 
     // Minimap (bottom-left with a mouse; top-left on touch, where the move stick isn't)
     const mm = compact ? 96 : 150, mx0 = 12, my0 = touchMode ? 12 : H - mm - 12;
@@ -1931,6 +2085,12 @@
     // Minimap
     const s = mm / WORLD;
     ctx.fillStyle = 'rgba(0,0,0,.45)'; ctx.fillRect(mx0, my0, mm, mm);
+    for (let t = 0; t < teamMode; t++) {
+      const b = basePos(t);
+      ctx.globalAlpha = 0.35; ctx.fillStyle = TEAM_INFO[t].color;
+      ctx.beginPath(); ctx.arc(mx0 + b.x * s, my0 + b.y * s, BASE_R * s, 0, Math.PI * 2); ctx.fill();
+      ctx.globalAlpha = 1;
+    }
     ctx.fillStyle = 'rgba(200,200,210,.6)';
     for (const r of rects) ctx.fillRect(mx0 + r.x * s, my0 + r.y * s, Math.max(1, r.w * s), Math.max(1, r.h * s));
     for (const o of rocks) { ctx.beginPath(); ctx.arc(mx0 + o.x * s, my0 + o.y * s, o.r * s, 0, Math.PI * 2); ctx.fill(); }
@@ -1944,7 +2104,7 @@
       ctx.beginPath(); ctx.arc(mx0 + d.x * s, my0 + d.y * s, 2.5, 0, Math.PI * 2); ctx.fill();
     }
     for (const q of players) {
-      if (!q.alive || !allied(me.id, q.id)) continue; // teammates show on your minimap
+      if (!q.alive || q === me || !friendly(me.id, q.id)) continue; // teammates show on your minimap
       ctx.fillStyle = '#3dff8b'; ctx.strokeStyle = '#102a17'; ctx.lineWidth = 1.5;
       ctx.beginPath(); ctx.arc(mx0 + q.x * s, my0 + q.y * s, 3.5, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
     }
@@ -2073,7 +2233,7 @@
   document.getElementById('teamNo').onclick = () => answerTeam(false);
 
   function refreshTeamsUI() {
-    const show = running && !!me;
+    const show = running && !!me && !teamMode; // set teams replace ask-to-team-up
     const others = show ? players.filter(q => q !== me).sort((a, b) => a.isBot - b.isBot || a.name.localeCompare(b.name)) : [];
     const ask = show ? incomingAsk() : null;
     const sig = [show, teamPanel.hidden, ask && ask.id, others.map(q => q.id + q.name + q.color).join(),
@@ -2143,21 +2303,37 @@
     pctx.clearRect(0, 0, paint.width, paint.height);
     players = []; balls = []; particles = []; feed = []; rings = []; popups = []; banner = null; outbox = []; drops = []; deploys = []; rebuildRects();
     alliances = {}; requests = {};
-    me = makePlayer(name, chosen, false, mode === 'client' ? opts.id : 'h');
-    players.push(me);
+    botNames = [...BOT_NAMES].sort(() => Math.random() - 0.5);
     if (mode === 'client') {
+      teamMode = opts.teams || 0;
+      me = makePlayer(name, chosen, false, opts.id);
       me.maxHp = PLAYER_HP; // the host sends everything else
-    } else {
-      const botColors = COLORS.filter(c => c !== chosen);
-      const names = [...BOT_NAMES].sort(() => Math.random() - 0.5);
-      for (let i = 0; i < NUM_BOTS; i++) players.push(makePlayer(names[i], botColors[i % botColors.length], true, 'b' + (++nextId)));
+      players.push(me);
+    } else if (mode === 'host' && lobby) {
+      // Everyone from the lobby, on the teams the host picked
+      teamMode = lobby.teams; totalPlayers = Math.max(lobby.total, lobby.people.length);
+      for (const q of lobby.people) {
+        const p = makePlayer(q.name, teamMode ? TEAM_INFO[q.team].color : q.color, false, q.id);
+        p.team = teamMode ? q.team : null;
+        p.remote = q.id !== 'h';
+        if (q.id === 'h') me = p;
+        players.push(p);
+      }
       for (const p of players) spawn(p);
+      rebalanceBots();
+    } else {
+      teamMode = 0; totalPlayers = NUM_BOTS + 1;
+      me = makePlayer(name, chosen, false, 'h');
+      players.push(me);
+      spawn(me);
+      rebalanceBots();
     }
     camX = me.x - VW / 2; camY = me.y - VH / 2;
     sticks.move = sticks.aim = null; sprintOn = false; reloadSeq = 0;
     try { audio = audio || new (window.AudioContext || window.webkitAudioContext)(); audio.resume(); } catch (e) { /* no sound */ }
     netMsg('');
     document.getElementById('menu').style.display = 'none';
+    hideLobby();
     running = true;
     refreshUpdateButton();
   }
@@ -2165,12 +2341,128 @@
   // Back to the menu (the host left, or the connection dropped)
   function endGame(text) {
     running = false;
-    mode = 'solo';
+    mode = 'solo'; teamMode = 0; lobby = null;
+    hideLobby();
     me = null; players = []; balls = [];
     document.getElementById('menu').style.display = '';
     netMsg(text);
     refreshUpdateButton();
   }
+
+  // ---------- Lobby (hosted games) ----------
+  // The host picks the number of teams, the total number of players and who's on which team.
+  // Friends see the same screen live and wait for the host to press Start.
+  let lobby = null;          // host only: { teams, total, people: [{ id, name, color, team }] }
+  let clientLobby = null;    // a friend's copy of the host's lobby, for showing it
+  const lobbyEl = document.getElementById('lobby');
+
+  function openLobby() {
+    mode = 'host';
+    const name = document.getElementById('name').value.trim() || 'Host';
+    lobby = { teams: 2, total: 12, people: [{ id: 'h', name, color: chosen, team: 0 }] };
+    netMsg('');
+    showLobby();
+  }
+  function smallestLobbyTeam() {
+    let best = 0;
+    for (let t = 1; t < lobby.teams; t++) if (lobby.people.filter(q => q.team === t).length < lobby.people.filter(q => q.team === best).length) best = t;
+    return best;
+  }
+  function lobbyState(forId) {
+    return { t: 'lobby', teams: lobby.teams, total: lobby.total, you: forId,
+      people: lobby.people.map(({ id, name, color, team }) => ({ id, name, color, team })) };
+  }
+  function broadcastLobby() {
+    for (const c of conns) if (c.lobbyId) { try { c.send(lobbyState(c.lobbyId)); } catch (e) { /* dropped */ } }
+    renderLobby();
+  }
+  function setLobbyTeams(n) {
+    lobby.teams = n;
+    // Keep people on their team where it still exists, and spread everyone else out
+    for (const q of lobby.people) q.team = n && q.team != null && q.team < n ? q.team : null;
+    for (const q of lobby.people) if (n && q.team == null) q.team = smallestLobbyTeam();
+    broadcastLobby();
+  }
+  function shuffleLobby() {
+    const order = [...lobby.people].sort(() => Math.random() - 0.5);
+    order.forEach((q, i) => { q.team = i % lobby.teams; });
+    broadcastLobby();
+  }
+  function startHosted() {
+    if (!lobby) return;
+    startGame('host');
+    // Tell each friend which player they are, then the game begins for them too
+    for (const c of conns) {
+      if (!c.lobbyId) continue;
+      c.player = players.find(p => p.id === c.lobbyId);
+      try { c.send({ t: 'welcome', id: c.lobbyId, seed: mapSeed, code: roomCode, teams: teamMode }); } catch (e) { /* dropped */ }
+    }
+    lobby = null;
+  }
+
+  function showLobby() {
+    document.getElementById('menu').style.display = 'none';
+    lobbyEl.hidden = false;
+    renderLobby();
+  }
+  function hideLobby() { lobbyEl.hidden = true; }
+
+  function renderLobby() {
+    if (lobbyEl.hidden) return;
+    const isHost = mode === 'host', L = isHost ? lobby : clientLobby;
+    if (!L) return;
+    const myId = isHost ? 'h' : L.you;
+    document.getElementById('lCode').textContent = roomCode;
+    for (const b of document.querySelectorAll('#lTeams button')) {
+      b.classList.toggle('on', +b.dataset.v === L.teams);
+      b.disabled = !isHost;
+    }
+    const people = L.people.length, total = Math.max(L.total, people);
+    document.getElementById('lTotal').textContent = total;
+    document.getElementById('lMinus').disabled = !isHost || total <= Math.max(2, people);
+    document.getElementById('lPlus').disabled = !isHost || total >= MAX_PLAYERS;
+    const bots = total - people;
+    document.getElementById('lMix').textContent = `${people} ${people === 1 ? 'person' : 'people'} + ${bots} bot${bots === 1 ? '' : 's'}`;
+    const list = document.getElementById('lPeople');
+    list.textContent = '';
+    for (const q of L.people) {
+      const li = document.createElement('li');
+      const dot = document.createElement('span'); dot.className = 'dot';
+      dot.style.background = L.teams && q.team != null ? TEAM_INFO[q.team].color : q.color;
+      const nm = document.createElement('span'); nm.className = 'nm'; nm.textContent = q.name;
+      const tags = [q.id === myId ? 'you' : '', q.id === 'h' ? 'host' : ''].filter(Boolean).join(', ');
+      if (tags) { const sm = document.createElement('small'); sm.textContent = ` (${tags})`; nm.appendChild(sm); }
+      li.append(dot, nm);
+      if (L.teams) {
+        const chips = document.createElement('div'); chips.className = 'chips';
+        for (let t = 0; t < L.teams; t++) {
+          const c = document.createElement('button');
+          c.style.background = TEAM_INFO[t].color;
+          c.title = c.ariaLabel = `Team ${TEAM_INFO[t].name}`;
+          c.classList.toggle('on', q.team === t);
+          c.disabled = !isHost;
+          c.onclick = () => { q.team = t; broadcastLobby(); };
+          chips.appendChild(c);
+        }
+        li.appendChild(chips);
+      }
+      list.appendChild(li);
+    }
+    document.getElementById('lShuffle').hidden = !isHost || !L.teams || people < 2;
+    document.getElementById('lStart').hidden = !isHost;
+    const host = L.people.find(q => q.id === 'h');
+    const mine = L.people.find(q => q.id === myId);
+    const wait = document.getElementById('lWait');
+    wait.hidden = isHost;
+    wait.textContent = `Waiting for ${host ? host.name : 'the host'} to start the game…` +
+      (L.teams && mine && mine.team != null ? ` You're on Team ${TEAM_INFO[mine.team].name}.` : '');
+  }
+  for (const b of document.querySelectorAll('#lTeams button')) b.onclick = () => { if (lobby) setLobbyTeams(+b.dataset.v); };
+  document.getElementById('lMinus').onclick = () => { if (lobby) { lobby.total = Math.max(Math.max(2, lobby.people.length), lobby.total - 1); broadcastLobby(); } };
+  document.getElementById('lPlus').onclick = () => { if (lobby) { lobby.total = Math.min(MAX_PLAYERS, lobby.total + 1); broadcastLobby(); } };
+  document.getElementById('lShuffle').onclick = () => { if (lobby) shuffleLobby(); };
+  document.getElementById('lStart').onclick = startHosted;
+  document.getElementById('lLeave').onclick = () => { stopNet(); lobby = null; clientLobby = null; mode = 'solo'; hideLobby(); document.getElementById('menu').style.display = ''; netMsg(''); };
 
   document.getElementById('play').onclick = () => startGame('solo');
   document.getElementById('host').onclick = () => hostGame();
