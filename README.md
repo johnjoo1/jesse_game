@@ -34,6 +34,18 @@ using the free PeerJS service to find each other. Nobody needs an account. If th
 leaves, the game ends for everyone. Some school or work networks block these direct
 connections. Multiplayer doesn't work in the Claude artifact version, so use the GitHub Pages link.
 
+## Updates without losing your game
+
+The page checks every 90 seconds whether a newer version is online. If there is one, an
+**Update ready** button appears at the top. Tapping it saves the game, reloads with the new
+version, and puts everything back: positions, scores, boosts and paint on the ground.
+
+- Playing solo: tap the button whenever you like.
+- Hosting: tapping it updates everyone. Friends reload with you and rejoin the same room as the same player.
+- Joined a friend's game: the button tells you the host can update everyone.
+
+If a friend and the host end up on different versions, joining says so and asks both to refresh.
+
 ## Turning on GitHub Pages
 
 1. Settings → General → Danger Zone → **Change visibility** → make the repo public

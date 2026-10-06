@@ -63,6 +63,13 @@
     width: 76px; flex: none; margin: 0; text-align: center; text-transform: uppercase;
     font-weight: 700; letter-spacing: .12em; font-size: 16px; padding: 8px 4px;
   }
+  #update {
+    position: fixed; z-index: 10; left: 50%; transform: translateX(-50%);
+    top: calc(46px + env(safe-area-inset-top, 0px)); max-width: calc(100vw - 32px);
+    background: #ffe066; color: #222; border: 0; border-radius: 999px; padding: 8px 16px;
+    font: 700 14px system-ui, sans-serif; box-shadow: 0 4px 16px rgba(0,0,0,.35); cursor: pointer;
+  }
+  #update:disabled { cursor: default; opacity: .85; }
   #netmsg { min-height: 18px; margin-top: 8px; font-size: 13px; color: #b8336a; font-weight: 600; }
   button:focus-visible, input:focus-visible { outline: 3px solid #3da5ff; outline-offset: 2px; }
 </style>
@@ -71,6 +78,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/peerjs/1.5.4/peerjs.min.js"
         onerror="var s=document.createElement('script');s.src='https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js';document.head.appendChild(s)"></script>
 <canvas id="c"></canvas>
+<button id="update" hidden></button>
 <div id="menu">
   <div class="card">
     <h1>Paintball Wars</h1>
@@ -704,6 +712,14 @@
   }
 
   function simUpdate(dt) {
+    if (mode === 'host') {
+      const now = performance.now();
+      for (const p of players.filter(q => q.awayUntil && now > q.awayUntil)) {
+        players = players.filter(q => q !== p);
+        fx({ t: 'msg', s: `${p.name} left the game` });
+        rebalanceBots();
+      }
+    }
     for (const p of players) {
       if (!p.alive) {
         p.respawn -= dt;
@@ -825,12 +841,14 @@
     return false;
   }
 
-  function hostGame() {
-    if (connecting || !peerAvailable()) return;
+  // reopen: after an update the host reclaims the same room code so friends can come back
+  function hostGame(reopen, tries = 0) {
+    if (connecting) return;
+    if (!window.Peer) { if (reopen) addFeed("Couldn't reopen the room, so friends can't rejoin", true); else peerAvailable(); return; }
     connecting = true;
-    let code = '';
-    for (let i = 0; i < 4; i++) code += CODE_CHARS[Math.floor(Math.random() * CODE_CHARS.length)];
-    netMsg('Creating a room…');
+    let code = reopen || '';
+    if (!reopen) for (let i = 0; i < 4; i++) code += CODE_CHARS[Math.floor(Math.random() * CODE_CHARS.length)];
+    if (!reopen) netMsg('Creating a room…');
     const pr = peer = new Peer(PEER_PREFIX + code);
     const timer = setTimeout(() => { if (peer === pr && !running) netFail(NO_SERVER); }, 12000);
     pr.on('open', () => {
@@ -838,13 +856,20 @@
       if (peer !== pr) return;
       connecting = false;
       roomCode = code;
-      startGame('host');
+      if (!reopen) startGame('host');
     });
     pr.on('connection', setupHostConn);
     pr.on('error', err => {
       clearTimeout(timer);
       if (peer !== pr) return;
-      if (err.type === 'unavailable-id') { stopNet(); hostGame(); return; } // code taken: pick another
+      if (err.type === 'unavailable-id') {
+        stopNet();
+        // A new room picks another code; a reopened room waits for the old connection to clear
+        if (!reopen) hostGame();
+        else if (tries < 15) setTimeout(() => { if (mode === 'host') hostGame(reopen, tries + 1); }, 2000);
+        else addFeed("Couldn't reopen the room, so friends can't rejoin", true);
+        return;
+      }
       if (!running) netFail(NO_SERVER);
     });
   }
@@ -858,6 +883,17 @@
     conn.on('data', m => {
       if (!m || typeof m !== 'object' || mode !== 'host') return;
       if (m.t === 'hello' && !conn.player) {
+        if (updating) { conn.close(); return; } // about to reload: friends will retry and find the new page
+        if (pageVersion && m.v && m.v !== pageVersion) { conn.send({ t: 'oldver' }); setTimeout(() => conn.close(), 500); return; }
+        // A friend coming back after an update gets their old player (score, boosts, spot) back
+        const back = m.rejoin && players.find(p => p.remote && p.id === m.rejoin && p.awayUntil);
+        if (back) {
+          back.awayUntil = 0; back.shield = SPAWN_SHIELD; back.inp = null;
+          conn.player = back;
+          conn.send({ t: 'welcome', id: back.id, seed: mapSeed, code: roomCode });
+          fx({ t: 'msg', s: `${back.name} is back` });
+          return;
+        }
         if (players.filter(p => !p.isBot).length >= MAX_HUMANS) { conn.send({ t: 'full' }); setTimeout(() => conn.close(), 500); return; }
         // Two people with the same color is confusing, so swap to a free one if needed
         let color = cleanColor(m.color);
@@ -885,7 +921,7 @@
   function dropConn(conn) {
     if (!conns.includes(conn)) return;
     conns = conns.filter(c => c !== conn);
-    if (conn.player && mode === 'host') {
+    if (conn.player && mode === 'host' && !updating) { // during an update, friends drop off on purpose
       conn.player.alive = false;
       players = players.filter(p => p !== conn.player);
       fx({ t: 'msg', s: `${conn.player.name} left the game` });
@@ -930,19 +966,28 @@
     for (const c of conns) if (c.open !== false) { try { c.send(msg); } catch (e) { /* dropped connection */ } }
   }
 
-  function joinGame() {
+  // rejoin: { code, id, paint, tries } when coming back after an update
+  function joinGame(rejoin) {
     if (connecting) return;
-    const code = document.getElementById('code').value.trim().toUpperCase();
+    const code = rejoin ? rejoin.code : document.getElementById('code').value.trim().toUpperCase();
     if (!/^[A-Z]{4}$/.test(code)) { netMsg('Type the 4-letter room code from the host’s screen.'); return; }
     if (!peerAvailable()) return;
     connecting = true;
-    netMsg('Joining room ' + code + '…');
+    netMsg(rejoin ? `Updated! Rejoining room ${code}…` : 'Joining room ' + code + '…');
     const pr = peer = new Peer();
-    const timer = setTimeout(() => { if (peer === pr && !running) netFail(`Couldn't join room ${code}. Check the code, and that the host still has the game open.`); }, 15000);
+    const timer = setTimeout(() => { if (peer === pr && !running) netFail(`Couldn't join room ${code}. Check the code, and that the host still has the game open.`); }, rejoin ? 45000 : 15000);
+    // Coming back after an update, the host may still be reloading: keep trying for about 40 seconds
+    const retry = () => {
+      if (!rejoin || (rejoin.tries || 0) >= 20) return false;
+      clearTimeout(timer);
+      stopNet();
+      setTimeout(() => joinGame({ ...rejoin, tries: (rejoin.tries || 0) + 1 }), 2000);
+      return true;
+    };
     pr.on('open', () => {
       if (peer !== pr) return;
       const conn = hostConn = pr.connect(PEER_PREFIX + code, { reliable: true });
-      conn.on('open', () => conn.send({ t: 'hello', name: document.getElementById('name').value.trim() || 'Friend', color: chosen }));
+      conn.on('open', () => conn.send({ t: 'hello', name: document.getElementById('name').value.trim() || 'Friend', color: chosen, v: pageVersion, rejoin: rejoin && rejoin.id }));
       conn.on('data', m => {
         if (!m || typeof m !== 'object' || peer !== pr) return;
         if (m.t === 'welcome' && !running) {
@@ -951,6 +996,14 @@
           roomCode = code;
           lastSnap = performance.now();
           startGame('client', { seed: num(m.seed, 1), id: String(m.id) });
+          if (rejoin && rejoin.paint) restorePaint(rejoin.paint);
+        } else if (m.t === 'update') {
+          // The host is updating everyone: save who we are and reload with them
+          updating = true;
+          saveState({ f: SAVE_FORMAT, at: Date.now(), mode: 'client', roomCode, myId: me && me.id, name: me && me.name, color: chosen, paint: paintData() });
+          location.reload();
+        } else if (m.t === 'oldver') {
+          if (!retry()) netFail('You and the host have different versions of the game. Both of you refresh the page, then try again.');
         } else if (m.t === 'full') {
           clearTimeout(timer);
           netFail('That game is full (8 players).');
@@ -959,11 +1012,16 @@
           applySnapshot(m);
         }
       });
-      conn.on('close', () => { if (peer === pr) netFail('The host left the game.'); });
+      conn.on('close', () => {
+        if (peer !== pr || updating) return;
+        if (!running && retry()) return;
+        netFail('The host left the game.');
+      });
     });
     pr.on('error', err => {
       if (peer !== pr) return;
       clearTimeout(timer);
+      if (err.type === 'peer-unavailable' && retry()) return;
       if (err.type === 'peer-unavailable') netFail(`No game found with code ${code}. Check the code, and that the host still has the game open.`);
       else if (!running) netFail(NO_SERVER);
       // Once playing, only a closed connection to the host ends the game (see 'close' above)
@@ -1013,6 +1071,120 @@
         hostConn.send({ t: 'in', x: Math.round(me.x), y: Math.round(me.y), vx: Math.round(me.vx), vy: Math.round(me.vy),
           aim: Math.round(me.aim * 100) / 100, fire: fire && me.ammo > 0, rl: reloadSeq, ss: me.ss });
       } catch (e) { /* dropped connection */ }
+    }
+  }
+
+  // ---------- Updates that keep your game ----------
+  // The page checks every 90 seconds whether a newer version is online. Tapping "Update" saves
+  // the game, reloads, and puts everything back: positions, scores, boosts, paint. A host's update
+  // takes their friends along; friends rejoin the same room automatically.
+  const SAVE_KEY = 'pbwars-save', SAVE_FORMAT = 1;
+  let pageVersion = null, updateReady = false, updating = false;
+  const updateBtn = document.getElementById('update');
+
+  function hashText(t) {
+    let h = 2166136261;
+    for (let i = 0; i < t.length; i++) { h ^= t.charCodeAt(i); h = Math.imul(h, 16777619); }
+    return (h >>> 0).toString(36);
+  }
+  async function fetchVersion() {
+    // Only on a normal web page; inside Claude, the artifact viewer delivers updates itself
+    if (!/^https?:$/.test(location.protocol) || window.top !== window) return null;
+    const res = await fetch(location.href.split('#')[0], { cache: 'no-store' });
+    return res.ok ? hashText(await res.text()) : null;
+  }
+  async function checkForUpdate() {
+    if (updateReady || !pageVersion) return;
+    try {
+      const v = await fetchVersion();
+      if (v && v !== pageVersion) { updateReady = true; refreshUpdateButton(); }
+    } catch (e) { /* offline: try again next time */ }
+  }
+  function refreshUpdateButton() {
+    updateBtn.hidden = !updateReady;
+    if (!updateReady) return;
+    const client = running && mode === 'client';
+    updateBtn.disabled = client;
+    updateBtn.textContent = client ? 'Update ready · the host can update everyone'
+      : running && mode === 'host' ? 'Update ready · tap to update everyone'
+      : running ? 'Update ready · tap to update (your game is saved)'
+      : 'Update ready · tap to update';
+  }
+  updateBtn.onclick = () => {
+    if (updating || (running && mode === 'client')) return;
+    updating = true;
+    updateBtn.textContent = 'Updating…';
+    if (running && mode === 'host') {
+      for (const c of conns) { try { c.send({ t: 'update' }); } catch (e) { /* dropped connection */ } }
+      setTimeout(saveAndReload, 400); // give friends a moment to hear it
+    } else saveAndReload();
+  };
+
+  function paintData() {
+    try { return paint.toDataURL('image/png'); } catch (e) { return null; }
+  }
+  function restorePaint(data) {
+    if (!data) return;
+    const img = new Image();
+    img.onload = () => pctx.drawImage(img, 0, 0);
+    img.src = data;
+  }
+  function saveState(save) {
+    try { sessionStorage.setItem(SAVE_KEY, JSON.stringify(save)); }
+    catch (e) {
+      // Too big with the paint? Save without it.
+      try { save.paint = null; sessionStorage.setItem(SAVE_KEY, JSON.stringify(save)); } catch (e2) { /* can't save */ }
+    }
+  }
+  const SAVED_FIELDS = ['id', 'name', 'color', 'isBot', 'remote', 'ss', 'buffs', 'magSize', 'x', 'y', 'aim', 'maxHp', 'hp',
+    'ammo', 'reload', 'cooldown', 'stamina', 'alive', 'respawn', 'shield', 'kills', 'deaths', 'streak', 'wanderA', 'strafe'];
+  function serializeGame() {
+    return {
+      f: SAVE_FORMAT, at: Date.now(), mode, roomCode, mapSeed, nextId, dropId, myId: me.id, camX, camY,
+      players: players.map(p => Object.fromEntries(SAVED_FIELDS.map(k => [k, p[k]]))),
+      drops, feed, paint: paintData(),
+    };
+  }
+  function saveAndReload() {
+    if (running && me) saveState(serializeGame());
+    location.reload();
+  }
+
+  function restoreGame(sv) {
+    if (!sv || sv.f !== SAVE_FORMAT || Date.now() - sv.at > 120000) return false;
+    try {
+      if (sv.name) document.getElementById('name').value = sv.name;
+      if (sv.mode === 'client') {
+        if (COLORS.includes(sv.color)) chosen = sv.color;
+        joinGame({ code: sv.roomCode, id: sv.myId, paint: sv.paint, tries: 0 });
+        return true;
+      }
+      const restored = sv.players.map(o => Object.assign(makePlayer(o.name, o.color, o.isBot, o.id), o));
+      const mine = restored.find(p => p.id === sv.myId);
+      if (!mine) return false;
+      mode = sv.mode; mapSeed = sv.mapSeed; nextId = sv.nextId; dropId = sv.dropId;
+      buildMap(mapSeed);
+      pctx.clearRect(0, 0, paint.width, paint.height);
+      restorePaint(sv.paint);
+      players = restored; me = mine;
+      document.getElementById('name').value = me.name;
+      if (COLORS.includes(me.color)) chosen = me.color;
+      balls = []; particles = []; rings = []; popups = []; outbox = []; banner = null;
+      drops = Array.isArray(sv.drops) ? sv.drops : [];
+      feed = Array.isArray(sv.feed) ? sv.feed : [];
+      camX = sv.camX; camY = sv.camY;
+      document.getElementById('menu').style.display = 'none';
+      running = true;
+      if (mode === 'host') {
+        // Friends are reloading too; keep their players safe and waiting for 30 seconds
+        roomCode = sv.roomCode;
+        for (const p of players) if (p.remote) { p.awayUntil = performance.now() + 30000; p.shield = 30; p.inp = null; }
+        hostGame(roomCode);
+      }
+      addFeed('Updated! Your game was saved.', true);
+      return true;
+    } catch (e) {
+      return false;
     }
   }
 
@@ -1456,6 +1628,7 @@
     netMsg('');
     document.getElementById('menu').style.display = 'none';
     running = true;
+    refreshUpdateButton();
   }
 
   // Back to the menu (the host left, or the connection dropped)
@@ -1465,11 +1638,12 @@
     me = null; players = []; balls = [];
     document.getElementById('menu').style.display = '';
     netMsg(text);
+    refreshUpdateButton();
   }
 
   document.getElementById('play').onclick = () => startGame('solo');
-  document.getElementById('host').onclick = hostGame;
-  document.getElementById('join').onclick = joinGame;
+  document.getElementById('host').onclick = () => hostGame();
+  document.getElementById('join').onclick = () => joinGame();
   document.getElementById('name').addEventListener('keydown', e => { if (e.key === 'Enter') startGame('solo'); });
   document.getElementById('code').addEventListener('keydown', e => { if (e.key === 'Enter') joinGame(); });
 
@@ -1478,6 +1652,21 @@
   camX = WORLD / 2 - VW / 2; camY = WORLD / 2 - VH / 2;
   setTouchMode(window.matchMedia('(pointer: coarse)').matches);
   requestAnimationFrame(frame);
+
+  fetchVersion().then(v => { pageVersion = v; if (v) setInterval(checkForUpdate, 90000); }).catch(() => {});
+
+  function boot(data) {
+    let save = data && data.save;
+    if (!save) {
+      try { save = JSON.parse(sessionStorage.getItem(SAVE_KEY)); } catch (e) { save = null; }
+    }
+    try { sessionStorage.removeItem(SAVE_KEY); } catch (e) { /* storage blocked */ }
+    if (save) restoreGame(save);
+  }
+  // Inside Claude, the artifact viewer hands a solo game to the new version when it updates the page
+  const hot = window.claude && window.claude.hot;
+  if (hot && hot.snapshot) hot.snapshot(() => (running && me && mode === 'solo' ? { save: serializeGame() } : {}));
+  if (hot && hot.ready) hot.ready(boot); else boot(hot && hot.data);
 })();
 </script>
 </body>
