@@ -25,6 +25,24 @@ a mouse or keyboard hides them. On small screens the view zooms out and the on-s
   your hits show a marker on the crosshair
 - 12-ball hopper with a reload, a sprint stamina bar, paint that stays on the ground, a kill feed and a minimap
 
+## Brain Boost (learning)
+
+Pick **Learning** on the start screen: Off, Math, Spanish or Mix (the default). It's saved on each
+device, so each kid can have their own. With it on, getting splatted shows a quick question with
+3 big answer buttons (or press 1, 2, 3). Questions are pitched at about age 7.
+
+- **Right answer:** you come back right away with a bonus boost.
+- **Wrong answer:** no penalty. The card shows the answer and you come back on the timer
+  (5 seconds with learning on, so there's time to read).
+- **3 in a row:** pick your own prize, a boost or a defense.
+- **Two misses in a row:** the next few questions are easier.
+- Your score shows as 🧠 right/total in the corner and on the win screen.
+
+| | Questions |
+|---|---|
+| Math | Adding within 10 and 20, taking away within 20, missing numbers (5 + ? = 9), counting pictures, biggest number |
+| Spanish | Picture → word (animals, food, things), colors, numbers 0–10 both ways, simple words (hola, gracias, por favor). A 🔊 button reads Spanish aloud, and the right word is spoken after each answer. |
+
 ## Power-ups
 
 Half of all splats drop something where the player went down. Walk over it to grab it.

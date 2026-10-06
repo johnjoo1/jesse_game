@@ -113,6 +113,35 @@
   #goList { text-align: left; margin: 0; padding-left: 22px; font-size: 15px; line-height: 1.6; }
   #goLobby { font-size: 18px; font-weight: 800; padding: 12px; border: 0; border-radius: 10px; background: #ff3d7f; color: #fff; cursor: pointer; }
   #goWait { margin: 0; font-weight: 700; color: #555; }
+  #goBrain { margin: 0; font-weight: 700; color: #2a8a52; }
+  .learn { margin-top: 14px; display: flex; flex-direction: column; align-items: center; gap: 6px; }
+  .llab { font-weight: 700; font-size: 14px; }
+  .llab small { display: block; font-weight: 500; color: #777; font-size: 12px; }
+  .learn .seg { border: 2px solid #222; border-radius: 10px; overflow: hidden; display: flex; }
+  .learn .seg button { border: 0; background: #fff; padding: 6px 10px; font: 700 13px system-ui, sans-serif; cursor: pointer; }
+  .learn .seg button + button { border-left: 2px solid #222; }
+  .learn .seg button.on { background: #222; color: #fff; }
+  #brain { position: fixed; inset: 0; z-index: 12; display: flex; align-items: center; justify-content: center; pointer-events: none; }
+  .bcard { pointer-events: auto; background: #fffdf5; color: #222; border: 4px solid #ffd23d; border-radius: 20px; padding: 14px 18px 16px;
+    width: min(440px, calc(100vw - 32px)); max-height: calc(100vh - 24px); overflow: auto; box-shadow: 0 12px 40px rgba(0,0,0,.45);
+    display: flex; flex-direction: column; align-items: center; gap: 10px; text-align: center; }
+  .btop { width: 100%; display: flex; justify-content: space-between; align-items: center; font: 700 14px system-ui, sans-serif; color: #8a6d00; gap: 8px; }
+  #bStreak { color: #ff8a3d; }
+  .bq { font: 800 26px system-ui, sans-serif; line-height: 1.25; text-wrap: balance; }
+  .bq .say { border: 0; background: #ffe066; border-radius: 10px; font-size: 20px; padding: 2px 8px; margin-left: 6px; cursor: pointer; vertical-align: middle; }
+  .bpic { font-size: 44px; line-height: 1.15; letter-spacing: 4px; word-break: break-all; }
+  .bpic .swatch { display: inline-block; width: 90px; height: 60px; border-radius: 12px; border: 3px solid #222; }
+  .bpic:empty { display: none; }
+  .bopts { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; width: 100%; }
+  .bopts button { flex: 1 1 110px; min-height: 64px; border: 3px solid #222; border-radius: 14px; background: #fff;
+    font: 800 26px system-ui, sans-serif; cursor: pointer; padding: 6px 10px; color: #222; }
+  .bopts button small { display: block; font-size: 12px; font-weight: 700; color: #777; }
+  .bopts button.big { font-size: 40px; }
+  .bopts button.right { background: #3dff8b; border-color: #1c8a49; }
+  .bopts button.wrong { background: #ffd0d0; border-color: #b8336a; opacity: .7; }
+  .bopts button:disabled { cursor: default; }
+  .bmsg { min-height: 22px; font: 700 17px system-ui, sans-serif; }
+  .bmsg.good { color: #1c8a49; } .bmsg.oops { color: #b8336a; }
   #lobby { position: fixed; inset: 0; z-index: 15; display: flex; align-items: center; justify-content: center; background: rgba(10, 20, 12, 0.75); overflow-y: auto; }
   .lcard { background: #fff; color: #222; border-radius: 16px; padding: 18px 20px; width: min(420px, calc(100vw - 32px)); margin: 16px 0;
     box-shadow: 0 10px 40px rgba(0,0,0,.4); display: flex; flex-direction: column; gap: 12px; }
@@ -193,13 +222,29 @@
       <b>Left thumb</b> move &nbsp;·&nbsp; <b>Right thumb</b> aim + shoot<br>
       Tap <b>⟳</b> to reload &nbsp;·&nbsp; <b>»</b> to sprint &nbsp;·&nbsp; a defense's button to place it
     </div>
+    <div class="learn">
+      <div class="llab">🧠 Brain Boost <small>questions when you respawn (ages 6–8)</small></div>
+      <div class="seg" id="learnSeg">
+        <button data-v="off">Off</button><button data-v="math">Math</button><button data-v="spanish">Spanish</button><button data-v="mix">Mix</button>
+      </div>
+    </div>
     <div id="rotate">Turn your phone sideways for the best view</div>
+  </div>
+</div>
+<div id="brain" hidden>
+  <div class="bcard" role="dialog" aria-labelledby="bQ">
+    <div class="btop"><span class="btag">🧠 Brain Boost</span><span id="bStreak"></span><span id="bTimer"></span></div>
+    <div id="bQ" class="bq"></div>
+    <div id="bPic" class="bpic"></div>
+    <div id="bOpts" class="bopts"></div>
+    <div id="bMsg" class="bmsg"></div>
   </div>
 </div>
 <div id="gameover" hidden>
   <div class="gcard">
     <div class="gtitle" id="goTitle"></div>
     <ol id="goList"></ol>
+    <p id="goBrain"></p>
     <button id="goLobby">BACK TO LOBBY</button>
     <p id="goWait">Waiting for the host to start another round…</p>
   </div>
@@ -605,7 +650,7 @@
 
   function kill(victim, killer) {
     victim.alive = false;
-    victim.respawn = RESPAWN_TIME;
+    victim.respawn = RESPAWN_TIME + (victim.learn ? 2 : 0); // a little longer to read the question
     victim.deaths++;
     victim.streak = 0;
     victim.grudge = { id: killer.id, at: performance.now() }; // bots won't team with whoever just splatted them
@@ -993,6 +1038,8 @@
   window.addEventListener('keydown', e => {
     if (document.activeElement && document.activeElement.tagName === 'INPUT') return;
     setTouchMode(false);
+    const qn = ['Digit1', 'Digit2', 'Digit3', 'Numpad1', 'Numpad2', 'Numpad3'].indexOf(e.code) % 3;
+    if (!brainEl.hidden && qn >= 0 && !e.repeat) { brainKey(qn); return; }
     keys[e.code] = true;
     if (e.code === 'KeyR' && me && me.alive) requestReload();
     if ((e.code === 'KeyE' || e.code === 'KeyQ') && me && me.alive && !e.repeat) requestUse(me.sel);
@@ -1470,6 +1517,9 @@
           vx: num(m.vx), vy: num(m.vy), aim: num(m.aim),
           fire: !!m.fire, rl: num(m.rl), ss: num(m.ss), use: num(m.use), us: num(m.us),
         };
+        conn.player.learn = !!m.ln;
+      } else if (m.t === 'brain' && conn.player && POWERUPS[m.k]) {
+        brainReward(conn.player, m.k);
       }
     });
     conn.on('close', () => dropConn(conn));
@@ -1710,7 +1760,7 @@
       sendTimer = 1 / 30;
       try {
         hostConn.send({ t: 'in', x: Math.round(me.x), y: Math.round(me.y), vx: Math.round(me.vx), vy: Math.round(me.vy),
-          aim: Math.round(me.aim * 100) / 100, fire: fire && me.ammo > 0, rl: reloadSeq, use: useSeq, us: useSlot, ss: me.ss });
+          aim: Math.round(me.aim * 100) / 100, fire: fire && me.ammo > 0, rl: reloadSeq, use: useSeq, us: useSlot, ss: me.ss, ln: learnMode !== 'off' });
       } catch (e) { /* dropped connection */ }
     }
   }
@@ -2302,7 +2352,7 @@
     // Stats (on touch the aim stick lives in this corner)
     if (!touchMode) {
       ctx.textAlign = 'right'; ctx.font = 'bold 14px system-ui'; ctx.fillStyle = '#fff';
-      ctx.fillText(`Splats: ${me.kills}   Deaths: ${me.deaths}`, W - 14, H - 16);
+      ctx.fillText(`Splats: ${me.kills}   Deaths: ${me.deaths}${brainAll ? `   🧠 ${brainOk}/${brainAll}` : ''}`, W - 14, H - 16);
     }
 
     // Hit marker at the crosshair (on touch: out along the aim line)
@@ -2456,6 +2506,238 @@
     }
   }
 
+  // ---------- Brain Boost: a quick question when you respawn ----------
+  // Pitched at about age 7. A right answer brings you back right away with a boost (3 in a row:
+  // pick your prize); a wrong answer just shows the answer and you come back on the normal timer.
+  // Two misses in a row make the next few questions easier.
+  const brainEl = document.getElementById('brain');
+  let learnMode = 'mix';
+  try { learnMode = localStorage.getItem('pbwLearn') || 'mix'; } catch (e) { /* storage blocked */ }
+  let brainOk = 0, brainAll = 0, brainStreak = 0, brainMisses = 0, brainEasy = 0;
+  let brainQ = null, brainState = 'off', brainWasAlive = true;
+
+  const ri = (a, b) => a + Math.floor(Math.random() * (b - a + 1));
+  const shuffle = (arr) => arr.map(v => [Math.random(), v]).sort((a, b) => a[0] - b[0]).map(x => x[1]);
+  const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
+  function numOpts(ans, min = 0) {
+    const set = new Set([ans]);
+    while (set.size < 3) { const d = ans + ri(-3, 3); if (d >= min && d !== ans) set.add(d); }
+    return shuffle([...set]);
+  }
+
+  // Questions as { q, pic, swatch, opts: [{ label, sub, color, big }], answer, say, explain }
+  function mathQuestion(easy) {
+    const kinds = easy ? ['add10', 'add10', 'count'] : ['add20', 'add20', 'sub', 'sub', 'count', 'bigger', 'missing', 'add10'];
+    const k = pick(kinds);
+    const asNums = (q, ans, explain, extra = {}) => {
+      const opts = numOpts(ans, k === 'count' || k === 'missing' ? 1 : 0);
+      return { q, opts: opts.map(n => ({ label: String(n) })), answer: opts.indexOf(ans), explain, ...extra };
+    };
+    if (k === 'add10' || k === 'add20') {
+      const max = k === 'add10' ? 10 : 20, a = ri(1, max - 1), b = ri(1, max - a);
+      return asNums(`${a} + ${b} = ?`, a + b, `${a} + ${b} = ${a + b}`);
+    }
+    if (k === 'sub') {
+      const a = ri(5, 20), b = ri(1, a - 1);
+      return asNums(`${a} − ${b} = ?`, a - b, `${a} − ${b} = ${a - b}`);
+    }
+    if (k === 'missing') {
+      const a = ri(1, 9), b = ri(1, 9);
+      return asNums(`${a} + ? = ${a + b}`, b, `${a} + ${b} = ${a + b}`);
+    }
+    if (k === 'bigger') {
+      const set = new Set();
+      while (set.size < 3) set.add(ri(5, 60));
+      const nums = shuffle([...set]), max = Math.max(...nums);
+      return { q: 'Which number is the biggest?', opts: nums.map(n => ({ label: String(n) })), answer: nums.indexOf(max), explain: `${max} is the biggest` };
+    }
+    const thing = pick(['🍎', '⭐', '🐟', '🎈', '🍪', '🐞', '⚽', '🍓']), n = ri(easy ? 2 : 4, easy ? 6 : 10);
+    return asNums('How many?', n, `There are ${n}`, { pic: thing.repeat(n) });
+  }
+
+  const ES = {
+    animals: [['perro', 'dog', '🐶'], ['gato', 'cat', '🐱'], ['pájaro', 'bird', '🐦'], ['pez', 'fish', '🐟'], ['vaca', 'cow', '🐮'],
+      ['caballo', 'horse', '🐴'], ['cerdo', 'pig', '🐷'], ['pato', 'duck', '🦆'], ['ratón', 'mouse', '🐭'], ['oso', 'bear', '🐻'],
+      ['conejo', 'rabbit', '🐰'], ['león', 'lion', '🦁'], ['mono', 'monkey', '🐵'], ['rana', 'frog', '🐸']],
+    food: [['manzana', 'apple', '🍎'], ['plátano', 'banana', '🍌'], ['leche', 'milk', '🥛'], ['pan', 'bread', '🍞'], ['queso', 'cheese', '🧀'],
+      ['huevo', 'egg', '🥚'], ['galleta', 'cookie', '🍪'], ['helado', 'ice cream', '🍦'], ['uvas', 'grapes', '🍇'], ['zanahoria', 'carrot', '🥕']],
+    things: [['sol', 'sun', '☀️'], ['luna', 'moon', '🌙'], ['casa', 'house', '🏠'], ['árbol', 'tree', '🌳'], ['flor', 'flower', '🌸'],
+      ['pelota', 'ball', '⚽'], ['libro', 'book', '📖'], ['carro', 'car', '🚗'], ['estrella', 'star', '⭐'], ['agua', 'water', '💧']],
+  };
+  const COLORS_ES = [['rojo', 'red', '#ff3b30'], ['azul', 'blue', '#2f7bff'], ['verde', 'green', '#2fbf4a'], ['amarillo', 'yellow', '#ffd60a'],
+    ['naranja', 'orange', '#ff8a1f'], ['morado', 'purple', '#9b4dff'], ['rosa', 'pink', '#ff7eb6'], ['negro', 'black', '#111111'],
+    ['blanco', 'white', '#ffffff'], ['café', 'brown', '#8b5a2b']];
+  const NUMS_ES = ['cero', 'uno', 'dos', 'tres', 'cuatro', 'cinco', 'seis', 'siete', 'ocho', 'nueve', 'diez'];
+  const PHRASES = [['hola', 'hello'], ['adiós', 'goodbye'], ['gracias', 'thank you'], ['por favor', 'please'], ['sí', 'yes'], ['buenos días', 'good morning']];
+
+  function threeFrom(list, item) { return shuffle([item, ...shuffle(list.filter(x => x !== item)).slice(0, 2)]); }
+  function spanishQuestion(easy) {
+    const kinds = easy ? ['picToWord', 'colorToWord', 'numToDigit'] : ['picToWord', 'picToWord', 'wordToPic', 'colorToWord', 'wordToColor', 'numToDigit', 'digitToNum', 'phrase'];
+    const k = pick(kinds);
+    if (k === 'picToWord' || k === 'wordToPic') {
+      const list = ES[pick(Object.keys(ES))], item = pick(list), opts = threeFrom(list, item);
+      if (k === 'picToWord') return { q: 'What is it in Spanish?', pic: item[2], opts: opts.map(o => ({ label: o[0] })), answer: opts.indexOf(item),
+        say: item[0], explain: `${item[2]} = ${item[0]} (${item[1]})` };
+      return { q: `Which one is “${item[0]}”?`, sayPrompt: item[0], opts: opts.map(o => ({ label: o[2], big: true })), answer: opts.indexOf(item),
+        say: item[0], explain: `${item[0]} = ${item[2]} ${item[1]}` };
+    }
+    if (k === 'colorToWord' || k === 'wordToColor') {
+      const item = pick(COLORS_ES), opts = threeFrom(COLORS_ES, item);
+      if (k === 'colorToWord') return { q: 'What color is this in Spanish?', swatch: item[2], opts: opts.map(o => ({ label: o[0] })), answer: opts.indexOf(item),
+        say: item[0], explain: `${item[0]} = ${item[1]}` };
+      return { q: `Which color is “${item[0]}”?`, sayPrompt: item[0], opts: opts.map(o => ({ label: '', color: o[2], sub: '' })), answer: opts.indexOf(item),
+        say: item[0], explain: `${item[0]} = ${item[1]}` };
+    }
+    if (k === 'numToDigit' || k === 'digitToNum') {
+      const n = ri(easy ? 1 : 1, 10), opts = numOpts(n, 0).map(x => Math.min(10, x));
+      const uniq = [...new Set(opts)];
+      while (uniq.length < 3) { const x = ri(0, 10); if (!uniq.includes(x)) uniq.push(x); }
+      const o3 = shuffle(uniq.slice(0, 3).includes(n) ? uniq.slice(0, 3) : [n, ...uniq.filter(x => x !== n).slice(0, 2)]);
+      if (k === 'numToDigit') return { q: `What number is “${NUMS_ES[n]}”?`, sayPrompt: NUMS_ES[n], opts: o3.map(x => ({ label: String(x) })), answer: o3.indexOf(n),
+        say: NUMS_ES[n], explain: `${NUMS_ES[n]} = ${n}` };
+      return { q: `How do you say ${n} in Spanish?`, opts: o3.map(x => ({ label: NUMS_ES[x] })), answer: o3.indexOf(n), say: NUMS_ES[n], explain: `${n} = ${NUMS_ES[n]}` };
+    }
+    const item = pick(PHRASES), opts = threeFrom(PHRASES, item);
+    return { q: `What does “${item[0]}” mean?`, sayPrompt: item[0], opts: opts.map(o => ({ label: o[1] })), answer: opts.indexOf(item), say: item[0],
+      explain: `${item[0]} = ${item[1]}` };
+  }
+  function makeQuestion() {
+    const easy = brainEasy > 0;
+    if (brainEasy > 0) brainEasy--;
+    const subject = learnMode === 'mix' ? pick(['math', 'spanish']) : learnMode;
+    return subject === 'math' ? mathQuestion(easy) : spanishQuestion(easy);
+  }
+
+  // Reads Spanish aloud (where the browser can)
+  function sayEs(text) {
+    try {
+      const u = new SpeechSynthesisUtterance(text);
+      u.lang = 'es-MX'; u.rate = 0.8;
+      speechSynthesis.cancel(); speechSynthesis.speak(u);
+    } catch (e) { /* no speech here */ }
+  }
+
+  const BRAIN_BOOSTS = ['rapid', 'speed', 'mag', 'triple', 'heart'];
+  // The host (or a solo game) hands out the prize: back in the game now, plus the boost
+  function brainReward(p, k) {
+    if (p.brainDeath === p.deaths) return; // one prize per splat
+    p.brainDeath = p.deaths;
+    if (!p.alive) spawn(p);
+    givePowerup(p, k);
+    fx({ t: 'pick', p: p.id, pn: p.name, k, x: p.x, y: p.y, sl: p.items.length });
+  }
+  function claimPrize(k) {
+    if (mode === 'client') { if (hostConn && hostConn.open) { try { hostConn.send({ t: 'brain', k }); } catch (e) { /* dropped */ } } }
+    else if (me) brainReward(me, k);
+  }
+
+  function openBrain() {
+    brainQ = makeQuestion();
+    brainState = 'ask';
+    const qEl = document.getElementById('bQ');
+    qEl.textContent = brainQ.q;
+    if (brainQ.sayPrompt || brainQ.say) {
+      const b = document.createElement('button'); b.className = 'say'; b.textContent = '🔊'; b.ariaLabel = 'Hear it';
+      b.onclick = () => sayEs(brainQ.sayPrompt || brainQ.say);
+      if (brainQ.sayPrompt) qEl.appendChild(b);
+    }
+    const pic = document.getElementById('bPic');
+    pic.textContent = '';
+    if (brainQ.pic) pic.textContent = brainQ.pic;
+    if (brainQ.swatch) { const sw = document.createElement('span'); sw.className = 'swatch'; sw.style.background = brainQ.swatch; pic.appendChild(sw); }
+    const opts = document.getElementById('bOpts');
+    opts.textContent = '';
+    brainQ.opts.forEach((o, i) => {
+      const b = document.createElement('button');
+      b.textContent = o.label;
+      if (o.big) b.classList.add('big');
+      if (o.color) { b.style.background = o.color; b.style.minHeight = '72px'; b.ariaLabel = `Color ${i + 1}`; }
+      if (!touchMode) { const k = document.createElement('small'); k.textContent = `press ${i + 1}`; b.appendChild(k); }
+      b.onclick = () => answerBrain(i);
+      opts.appendChild(b);
+    });
+    const msg = document.getElementById('bMsg'); msg.className = 'bmsg';
+    msg.textContent = 'Answer right to come back now with a boost!';
+    document.getElementById('bStreak').textContent = brainStreak ? `🔥 ${brainStreak} in a row` : '';
+    brainEl.hidden = false;
+    if (brainQ.sayPrompt) sayEs(brainQ.sayPrompt);
+  }
+  function answerBrain(i) {
+    if (brainState !== 'ask' || !brainQ) return;
+    brainState = 'answered';
+    brainAll++;
+    const buttons = [...document.querySelectorAll('#bOpts button')];
+    buttons.forEach(b => { b.disabled = true; });
+    buttons[brainQ.answer].classList.add('right');
+    const msg = document.getElementById('bMsg');
+    if (brainQ.say) sayEs(brainQ.say);
+    if (i === brainQ.answer) {
+      brainOk++; brainStreak++; brainMisses = 0;
+      sound('pick');
+      if (brainStreak % 3 === 0) {
+        msg.className = 'bmsg good'; msg.textContent = `🔥 ${brainStreak} in a row! Pick your prize:`;
+        setTimeout(showPrizes, 700);
+      } else {
+        const k = pick(BRAIN_BOOSTS);
+        msg.className = 'bmsg good'; msg.textContent = `✅ Yes! ${brainQ.explain}. Bonus: ${POWERUPS[k].icon} ${POWERUPS[k].name}!`;
+        claimPrize(k);
+        setTimeout(closeBrain, 1100);
+      }
+    } else {
+      buttons[i].classList.add('wrong');
+      brainStreak = 0;
+      if (++brainMisses >= 2) { brainEasy = 3; brainMisses = 0; } // a couple of easier ones next
+      msg.className = 'bmsg oops'; msg.textContent = `Almost! ${brainQ.explain}.`;
+      setTimeout(closeBrain, 2600); // or sooner, when you respawn
+    }
+  }
+  function showPrizes() {
+    if (brainState !== 'answered') return;
+    brainState = 'prize';
+    document.getElementById('bQ').textContent = 'Pick your prize! 🎁';
+    document.getElementById('bStreak').textContent = `🔥 ${brainStreak} in a row`;
+    document.getElementById('bPic').textContent = '';
+    const opts = document.getElementById('bOpts');
+    opts.textContent = '';
+    const choices = shuffle(['rapid', 'speed', 'mag', 'triple', 'golden', 'wall', 'heal', 'dome', 'turret', 'heart']).slice(0, 3);
+    choices.forEach((k, i) => {
+      const pu = POWERUPS[k], b = document.createElement('button');
+      b.textContent = pu.icon;
+      b.style.borderColor = pu.color;
+      const sm = document.createElement('small'); sm.textContent = pu.name + (touchMode ? '' : ` · ${i + 1}`); b.appendChild(sm);
+      b.onclick = () => { if (brainState !== 'prize') return; brainState = 'done'; claimPrize(k); closeBrain(); };
+      opts.appendChild(b);
+    });
+    document.getElementById('bMsg').textContent = '';
+  }
+  function brainKey(i) {
+    const b = document.querySelectorAll('#bOpts button')[i];
+    if (b && !b.disabled) b.click();
+  }
+  function closeBrain() {
+    brainEl.hidden = true;
+    brainState = 'off';
+    brainQ = null;
+  }
+  // Watches for your own splat (works the same in solo, hosting or joined games)
+  function brainTick() {
+    if (!me) return;
+    if (brainWasAlive && !me.alive && learnMode !== 'off' && gameOver == null && (mode !== 'client' || me.joined)) openBrain();
+    if (me.alive && !brainWasAlive && brainState === 'ask') closeBrain(); // came back on the timer before answering
+    brainWasAlive = me.alive;
+    if (!brainEl.hidden) {
+      document.getElementById('bTimer').textContent = me.alive ? '' : `Back in ${Math.ceil(me.respawn)}…`;
+    }
+  }
+  function setLearnMode(v) {
+    learnMode = v;
+    try { localStorage.setItem('pbwLearn', v); } catch (e) { /* storage blocked */ }
+    for (const b of document.querySelectorAll('#learnSeg button')) b.classList.toggle('on', b.dataset.v === v);
+    if (me && mode !== 'client') me.learn = v !== 'off';
+  }
+  for (const b of document.querySelectorAll('#learnSeg button')) b.onclick = () => setLearnMode(b.dataset.v);
+  setLearnMode(learnMode);
+
   // ---------- Game loop / menu ----------
   const autoRespawn = true;
   let running = false;
@@ -2466,6 +2748,7 @@
     if (running) update(dt);
     if (running && mode === 'host') sendSnapshots(dt);
     refreshTeamsUI();
+    if (running) brainTick();
     render();
     requestAnimationFrame(frame);
   }
@@ -2519,6 +2802,8 @@
       rebalanceBots();
     }
     camX = me.x - VW / 2; camY = me.y - VH / 2;
+    me.learn = learnMode !== 'off';
+    brainWasAlive = true; closeBrain();
     sticks.move = sticks.aim = null; sprintOn = false; reloadSeq = 0;
     try { audio = audio || new (window.AudioContext || window.webkitAudioContext)(); audio.resume(); } catch (e) { /* no sound */ }
     netMsg('');
@@ -2593,6 +2878,7 @@
       li.textContent = `${p.name}${p === me ? ' (you)' : ''}: ${p.kills} splat${p.kills === 1 ? '' : 's'}`;
       list.appendChild(li);
     }
+    document.getElementById('goBrain').textContent = brainAll ? `🧠 Brain Boosts: ${brainOk} of ${brainAll} right!` : '';
     document.getElementById('goLobby').hidden = mode !== 'host';
     document.getElementById('goWait').hidden = mode === 'host';
     gameOverEl.hidden = false;
