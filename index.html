@@ -106,6 +106,13 @@
   #teamList .empty { color: #777; font-size: 14px; }
   #teamList .tag { font-size: 11px; color: #777; border: 1px solid #ccc; border-radius: 4px; padding: 0 5px; }
   #update:disabled { cursor: default; opacity: .85; }
+  #gameover { position: fixed; inset: 0; z-index: 16; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,.45); }
+  .gcard { background: #fff; color: #222; border-radius: 16px; padding: 20px 22px; width: min(380px, calc(100vw - 32px));
+    box-shadow: 0 10px 40px rgba(0,0,0,.4); display: flex; flex-direction: column; gap: 12px; text-align: center; }
+  .gtitle { font: 900 30px system-ui, sans-serif; text-wrap: balance; }
+  #goList { text-align: left; margin: 0; padding-left: 22px; font-size: 15px; line-height: 1.6; }
+  #goLobby { font-size: 18px; font-weight: 800; padding: 12px; border: 0; border-radius: 10px; background: #ff3d7f; color: #fff; cursor: pointer; }
+  #goWait { margin: 0; font-weight: 700; color: #555; }
   #lobby { position: fixed; inset: 0; z-index: 15; display: flex; align-items: center; justify-content: center; background: rgba(10, 20, 12, 0.75); overflow-y: auto; }
   .lcard { background: #fff; color: #222; border-radius: 16px; padding: 18px 20px; width: min(420px, calc(100vw - 32px)); margin: 16px 0;
     box-shadow: 0 10px 40px rgba(0,0,0,.4); display: flex; flex-direction: column; gap: 12px; }
@@ -189,6 +196,14 @@
     <div id="rotate">Turn your phone sideways for the best view</div>
   </div>
 </div>
+<div id="gameover" hidden>
+  <div class="gcard">
+    <div class="gtitle" id="goTitle"></div>
+    <ol id="goList"></ol>
+    <button id="goLobby">BACK TO LOBBY</button>
+    <p id="goWait">Waiting for the host to start another round…</p>
+  </div>
+</div>
 <div id="lobby" hidden>
   <div class="lcard">
     <div class="lhead">
@@ -262,14 +277,16 @@
     turret: { ttl: 0, hp: 5, range: 380, rate: 0.5 },
   };
   const BOT_NAMES = ['Splatty', 'Blobby', 'Drip', 'Smudge', 'Neon', 'Goober', 'Pellet', 'Squish', 'Rainbow', 'Sploosh', 'Zippy', 'Mango',
-    'Gloop', 'Speckle', 'Dribble', 'Fizz', 'Noodle', 'Puddle', 'Swirl', 'Bonk', 'Wobble', 'Spritz', 'Jelly', 'Blotch', 'Squirt', 'Doodle'];
+    'Gloop', 'Speckle', 'Dribble', 'Fizz', 'Noodle', 'Puddle', 'Swirl', 'Bonk', 'Wobble', 'Spritz', 'Jelly', 'Blotch', 'Squirt', 'Doodle',
+    'Gumdrop', 'Smoosh', 'Pip', 'Kaboom', 'Wiggles', 'Flick'];
   // Team games: everyone wears their team's color and spawns at their team's base
   const TEAM_INFO = [
     { name: 'Red', color: '#ff4d4d' }, { name: 'Blue', color: '#3da5ff' },
     { name: 'Yellow', color: '#ffd23d' }, { name: 'Purple', color: '#b03dff' },
   ];
   const BASE_R = 260;              // how big a team's spawn area is
-  const MAX_PLAYERS = 24;          // people + bots in a hosted game
+  const MAX_PLAYERS = 30;          // people + bots in a hosted game
+  const CAPTURE_TIME = 8;          // seconds for one attacker to take an empty base (more attackers go faster)
 
   const canvas = document.getElementById('c');
   const ctx = canvas.getContext('2d');
@@ -449,6 +466,15 @@
     return false;
   }
 
+  // Each team's base: whether it's still standing, and how far an attacking team has got capturing it
+  let bases = [];        // [{ team, x, y, alive, capTeam, cap }]  (cap: 0..1)
+  let gameOver = null;   // the winning team, once only one is left
+  function setupBases() {
+    bases = [];
+    for (let t = 0; t < teamMode; t++) bases.push({ team: t, ...basePos(t), alive: true, capTeam: null, cap: 0 });
+    gameOver = null;
+  }
+  const activeTeams = () => bases.filter(b => b.alive).map(b => b.team);
   // Team bases sit around the arena: 2 teams face off left/right, 3 in a triangle, 4 on all sides
   function basePos(t) {
     const a = Math.PI + t * Math.PI * 2 / teamMode, R = WORLD * 0.38;
@@ -456,7 +482,7 @@
   }
   function freeSpot(who) {
     const enemyNear = (x, y, d) => players.some(p => p.alive && p !== who && !(who && friendly(p.id, who.id)) && dist2(x, y, p.x, p.y) < d * d);
-    if (teamMode && who && who.team != null) {
+    if (teamMode && who && who.team != null && bases[who.team] && bases[who.team].alive) {
       // Somewhere in your team's base, away from any enemy who wandered in
       const b = basePos(who.team);
       for (let tries = 0; tries < 300; tries++) {
@@ -502,6 +528,8 @@
       kills: 0, deaths: 0, streak: 0,
       // bot brain
       wanderA: Math.random() * Math.PI * 2, thinkT: 0, target: null, strafe: 1, reactT: 0,
+      role: Math.random() < 0.7 ? 'attack' : 'defend', // team games: go take enemy bases, or guard your own
+      ownColor: color, // the color they picked (team games paint everyone in team colors)
     };
   }
 
@@ -813,6 +841,12 @@
     else if (e.t === 'bu') burst(e.x, e.y, e.c, e.n, e.v);
     else if (e.t === 'imp') { splat(e.x, e.y, e.c, 8); burst(e.x, e.y, e.c, 5, 120); }
     else if (e.t === 'msg') addFeed(e.s, false);
+    else if (e.t === 'conq' && TEAM_INFO[e.w] && TEAM_INFO[e.l]) {
+      const W = TEAM_INFO[e.w], L = TEAM_INFO[e.l];
+      addFeed(`Team ${W.name} captured Team ${L.name}'s base!`, true);
+      banner = { text: `🏳 Team ${W.name} captured Team ${L.name}!`, sub: `Everyone on Team ${L.name} is now on Team ${W.name}`, t: 3, color: W.color };
+      sound('kill'); shake = 8;
+    } else if (e.t === 'over') showGameOver(e.w);
     else if (e.t === 'team') {
       const mine = e.a === myId || e.b === myId, other = e.a === myId ? e.bn : e.an;
       if (e.e === 'ask' && e.a === myId) addFeed(`Asked ${e.bn} to team up`, true);
@@ -975,6 +1009,7 @@
   // ---------- Bot AI ----------
   function botThink(b, dt) {
     b.thinkT -= dt;
+    b.detourT = Math.max(0, (b.detourT || 0) - dt);
     if (b.thinkT <= 0) {
       b.thinkT = rand(0.25, 0.5);
       // Pick nearest visible enemy (bushes hide you unless very close)
@@ -1007,7 +1042,7 @@
           if (d < nd) { near = o; nd = d; }
         }
         if (mate && dist2(b.x, b.y, mate.x, mate.y) > 220 * 220) b.wanderA = Math.atan2(mate.y - b.y, mate.x - b.x) + rand(-0.3, 0.3);
-        else if (near && Math.random() < 0.35) b.wanderA = Math.atan2(near.y - b.y, near.x - b.x) + rand(-0.6, 0.6);
+        else if (near && !teamMode && Math.random() < 0.35) b.wanderA = Math.atan2(near.y - b.y, near.x - b.x) + rand(-0.6, 0.6);
       }
     }
 
@@ -1025,6 +1060,14 @@
       const radial = d > pref + 60 ? 1 : d < pref - 60 ? -1 : 0;
       mx = ux * radial + -uy * b.strafe * 0.9;
       my = uy * radial + ux * b.strafe * 0.9;
+      if (teamMode && b.role === 'attack' && gameOver == null) {
+        // Attackers keep pushing toward the enemy base while they fight
+        const goal = bases.filter(x => x.alive && x.team !== b.team).sort((x, y) => dist2(b.x, b.y, x.x, x.y) - dist2(b.x, b.y, y.x, y.y))[0];
+        if (goal && dist2(b.x, b.y, goal.x, goal.y) > (BASE_R * 0.5) ** 2) {
+          const ga = Math.atan2(goal.y - b.y, goal.x - b.x);
+          mx += Math.cos(ga) * 0.9; my += Math.sin(ga) * 0.9;
+        }
+      }
       if (b.hp === 1 && b.ammo < 3) { mx = -ux; my = -uy; } // retreat when weak
       b.reactT -= dt;
       if (b.reactT <= 0 && b.reload <= 0 && Math.random() < 0.18) shoot(b);
@@ -1037,6 +1080,14 @@
       const heal = b.hp < b.maxHp && deploys.find(d => d.type === 'heal' && dist2(b.x, b.y, d.x, d.y) < 600 * 600);
       const d = heal || drops.find(d => dist2(b.x, b.y, d.x, d.y) < 300 * 300 && lineOfSight(b.x, b.y, d.x, d.y));
       if (d && !(heal && dist2(b.x, b.y, d.x, d.y) < 30 * 30)) b.wanderA = Math.atan2(d.y - b.y, d.x - b.x);
+      else if (teamMode && gameOver == null) {
+        // Team games: guard home (everyone rushes back if it's being taken), or go take the nearest enemy base
+        const home = bases.find(x => x.alive && x.team === b.team);
+        const underAttack = home && home.cap > 0 && home.capTeam !== b.team;
+        const enemyBases = bases.filter(x => x.alive && x.team !== b.team).sort((x, y) => dist2(b.x, b.y, x.x, x.y) - dist2(b.x, b.y, y.x, y.y));
+        const goal = home && (b.role === 'defend' || underAttack || !enemyBases.length) ? home : enemyBases[0];
+        if (goal && !b.detourT && dist2(b.x, b.y, goal.x, goal.y) > (BASE_R * 0.55) ** 2) b.wanderA = Math.atan2(goal.y - b.y, goal.x - b.x) + rand(-0.25, 0.25);
+      }
       mx = Math.cos(b.wanderA); my = Math.sin(b.wanderA);
       b.aim = b.wanderA;
       if (b.ammo < b.magSize) startReload(b);
@@ -1107,8 +1158,53 @@
     p.vx = mx * speed; p.vy = my * speed;
     p.x += p.vx * dt; p.y += p.vy * dt;
     const blocked = resolveCollisions(p);
-    if (blocked && p.isBot && !p.target) p.wanderA += Math.PI * rand(0.5, 1.5);
+    if (blocked && p.isBot && !p.target && !(p.detourT > 0)) {
+      // Bumped into something: slide off sideways for a moment before heading for the goal again
+      p.detourT = rand(0.6, 1.3);
+      p.wanderA += (Math.random() < 0.5 ? 1 : -1) * Math.PI / 2 * rand(0.8, 1.2);
+    }
     if (blocked && p.isBot && p.target) p.strafe *= -1;
+  }
+
+  // A base is taken by standing in it with none of its team there to stop you
+  function updateBases(dt) {
+    if (!teamMode || gameOver != null) return;
+    for (const b of bases) {
+      if (!b.alive) continue;
+      const inside = players.filter(p => p.alive && dist2(p.x, p.y, b.x, b.y) < BASE_R * BASE_R);
+      // Whoever has more players inside wins out: more attackers than defenders fills the meter
+      // (faster the bigger the edge), more defenders drains it, a tie holds it still
+      const defenders = inside.filter(p => p.team === b.team).length;
+      const attackTeams = [...new Set(inside.filter(p => p.team !== b.team).map(p => p.team))];
+      const count = (t) => inside.filter(p => p.team === t).length;
+      const lead = attackTeams.sort((x, y) => count(y) - count(x))[0];
+      const edge = lead == null ? -1 : count(lead) - Math.max(defenders, ...attackTeams.slice(1).map(count));
+      if (lead == null || edge < 0) {
+        b.cap = Math.max(0, b.cap - dt / CAPTURE_TIME * (defenders > 0 ? 1.5 : 0.5));
+      } else if (edge > 0) {
+        if (b.capTeam !== lead && b.cap > 0) b.cap = Math.max(0, b.cap - dt / CAPTURE_TIME); // someone else's progress drains first
+        else {
+          b.capTeam = lead;
+          b.cap += dt / CAPTURE_TIME * (1 + 0.25 * (Math.min(edge, 5) - 1));
+          if (b.cap >= 1) conquer(b, lead);
+        }
+      } // a tie: contested, nothing moves
+      if (b.cap === 0) b.capTeam = null;
+    }
+  }
+  function conquer(base, winner) {
+    base.alive = false; base.cap = 0; base.capTeam = null;
+    const lost = base.team;
+    for (const p of players) {
+      if (p.team !== lost) continue;
+      p.team = winner;
+      p.color = TEAM_INFO[winner].color;
+      p.target = null;
+      if (p.alive) p.shield = Math.max(p.shield, 2);
+    }
+    fx({ t: 'conq', w: winner, l: lost });
+    const left = activeTeams();
+    if (left.length === 1) { gameOver = left[0]; fx({ t: 'over', w: gameOver }); }
   }
 
   function simUpdate(dt) {
@@ -1119,7 +1215,7 @@
         removeDeploysOf(p.id);
         dropTeamsOf(p.id);
         fx({ t: 'msg', s: `${p.name} left the game` });
-        rebalanceBots();
+        rebalanceBots(p.team);
       }
     }
     for (const p of players) {
@@ -1168,7 +1264,7 @@
 
     updateDrops(dt);
     updateDeploys(dt);
-    if (mode !== 'client') updateTeams(dt);
+    if (mode !== 'client') { updateTeams(dt); updateBases(dt); }
 
     // Paintballs
     for (let i = balls.length - 1; i >= 0; i--) {
@@ -1363,7 +1459,7 @@
         conn.player = p;
         players.push(p);
         spawn(p);
-        rebalanceBots();
+        rebalanceBots(p.team);
         conn.send({ t: 'welcome', id: p.id, seed: mapSeed, code: roomCode, teams: teamMode });
         fx({ t: 'msg', s: `${p.name} joined the game` });
       } else if (m.t === 'team' && conn.player && ['ask', 'accept', 'decline', 'cancel', 'break'].includes(m.act)) {
@@ -1392,12 +1488,14 @@
       removeDeploysOf(conn.player.id);
       dropTeamsOf(conn.player.id);
       fx({ t: 'msg', s: `${conn.player.name} left the game` });
-      rebalanceBots();
+      rebalanceBots(conn.player.team);
     }
   }
 
-  // Bots fill the game up to the chosen number of players; in a team game, evenly across teams
-  function rebalanceBots() {
+  // Bots fill the game up to the chosen number of players. At the start of a team game they're spread
+  // evenly; later (people joining or leaving) only the total is kept, so captured teams stay captured.
+  // hint: the team that just gained or lost a person
+  function rebalanceBots(hint) {
     const removeBot = (b) => {
       b.alive = false;
       players = players.filter(p => p !== b);
@@ -1412,6 +1510,18 @@
       b.team = team;
       players.push(b); spawn(b);
     };
+    if (teamMode && running) {
+      const live = activeTeams();
+      const size = (t) => players.filter(p => p.team === t).length;
+      while (players.length > totalPlayers) {
+        const t = live.includes(hint) && players.some(p => p.isBot && p.team === hint) ? hint : live.slice().sort((a, b) => size(b) - size(a))[0];
+        const bot = players.filter(p => p.isBot && p.team === t).pop() || players.filter(p => p.isBot).pop();
+        if (!bot) break;
+        removeBot(bot);
+      }
+      while (players.length < totalPlayers && live.length) addBot(live.includes(hint) ? hint : live.slice().sort((a, b) => size(a) - size(b))[0]);
+      return;
+    }
     const groups = teamMode ? [...Array(teamMode).keys()] : [null];
     groups.forEach((t, i) => {
       // Each team's share of the total (the first teams get any leftover spot)
@@ -1425,8 +1535,9 @@
   }
   // A friend who joins mid-game goes to the team with the fewest people
   function teamForNewcomer() {
-    let best = 0;
-    for (let t = 1; t < teamMode; t++) {
+    const live = activeTeams();
+    let best = live[0];
+    for (const t of live) {
       const count = (k, bot) => players.filter(p => p.team === k && (bot === undefined || p.isBot === bot)).length;
       if (count(t, false) < count(best, false) || (count(t, false) === count(best, false) && count(t) < count(best))) best = t;
     }
@@ -1448,6 +1559,7 @@
       dp: deploys.map(d => [d.id, d.type, d.owner, d.color, Math.round(d.x), Math.round(d.y), d.w || 0, d.h || 0, r1(d.ttl), d.hp, Math.round(d.aim * 100) / 100]),
       fx: outbox,
       tm: { al: Object.entries(alliances).map(([k, v]) => [k, r1(v.breakT)]), rq: Object.keys(requests) },
+      bs: bases.map(b => [b.alive ? 1 : 0, b.capTeam, Math.round(b.cap * 100) / 100]), go: gameOver,
     };
     outbox = [];
     for (const c of conns) if (c.open !== false) { try { c.send(msg); } catch (e) { /* dropped connection */ } }
@@ -1497,6 +1609,9 @@
           lastSnap = performance.now();
           startGame('client', { seed: num(m.seed, 1), id: String(m.id), teams: clamp(num(m.teams), 0, 4) | 0 });
           if (back && opts.paint) restorePaint(opts.paint);
+        } else if (m.t === 'tolobby' && running) {
+          running = false; me = null; players = []; balls = []; bases = []; gameOver = null; teamMode = 0;
+          gameOverEl.hidden = true; // the host's lobby message follows
         } else if (m.t === 'update') {
           // The host is updating everyone: save who we are and reload with them
           updating = true;
@@ -1561,6 +1676,10 @@
     players = players.filter(p => seen.has(p.id));
     balls = m.b.map(([x, y, vx, vy, c]) => ({ x, y, vx, vy, color: c }));
     if (Array.isArray(m.d)) drops = m.d.filter(d => POWERUPS[d[3]]).map(([id, x, y, type, ttl]) => ({ id, x, y, type, ttl }));
+    if (Number.isInteger(m.go) && gameOver == null) { gameOver = m.go; if (gameOverEl.hidden) showGameOver(m.go); }
+    if (Array.isArray(m.bs) && m.bs.length === bases.length) {
+      m.bs.forEach(([alive, capTeam, cap], i) => Object.assign(bases[i], { alive: !!alive, capTeam: Number.isInteger(capTeam) ? capTeam : null, cap: num(cap) }));
+    }
     if (m.tm && Array.isArray(m.tm.al) && Array.isArray(m.tm.rq)) {
       alliances = {}; requests = {};
       for (const [k, breakT] of m.tm.al) if (typeof k === 'string') alliances[k] = { breakT: num(breakT) };
@@ -1659,11 +1778,11 @@
       try { save.paint = null; sessionStorage.setItem(SAVE_KEY, JSON.stringify(save)); } catch (e2) { /* can't save */ }
     }
   }
-  const SAVED_FIELDS = ['id', 'name', 'color', 'isBot', 'remote', 'ss', 'buffs', 'magSize', 'items', 'sel', 'team', 'x', 'y', 'aim', 'maxHp', 'hp',
+  const SAVED_FIELDS = ['id', 'name', 'color', 'isBot', 'remote', 'ss', 'buffs', 'magSize', 'items', 'sel', 'team', 'role', 'ownColor', 'x', 'y', 'aim', 'maxHp', 'hp',
     'ammo', 'reload', 'cooldown', 'stamina', 'alive', 'respawn', 'shield', 'kills', 'deaths', 'streak', 'wanderA', 'strafe'];
   function serializeGame() {
     return {
-      f: SAVE_FORMAT, at: Date.now(), mode, roomCode, roomGen, mapSeed, nextId, dropId, myId: me.id, camX, camY, teamMode, totalPlayers, botNames,
+      f: SAVE_FORMAT, at: Date.now(), mode, roomCode, roomGen, mapSeed, nextId, dropId, myId: me.id, camX, camY, teamMode, totalPlayers, botNames, bases, gameOver,
       players: players.map(p => Object.fromEntries(SAVED_FIELDS.map(k => [k, p[k]]))),
       drops, deploys, deployId, feed, alliances, requests, paint: paintData(),
     };
@@ -1694,6 +1813,9 @@
       if (!mine) return false;
       mode = sv.mode; mapSeed = sv.mapSeed; nextId = sv.nextId; dropId = sv.dropId;
       teamMode = sv.teamMode || 0; totalPlayers = sv.totalPlayers || NUM_BOTS + 1;
+      setupBases();
+      if (Array.isArray(sv.bases) && sv.bases.length === bases.length) bases = sv.bases;
+      gameOver = sv.gameOver ?? null;
       if (Array.isArray(sv.botNames)) botNames = sv.botNames;
       buildMap(mapSeed);
       pctx.clearRect(0, 0, paint.width, paint.height);
@@ -1836,10 +1958,10 @@
     }
     ctx.strokeStyle = '#2b4427'; ctx.lineWidth = 8; ctx.strokeRect(-4, -4, WORLD + 8, WORLD + 8);
 
-    // Team bases
-    for (let t = 0; t < teamMode; t++) {
-      const b = basePos(t), info = TEAM_INFO[t];
-      if (!seen(b.x - BASE_R, b.y - BASE_R, BASE_R * 2, BASE_R * 2)) continue;
+    // Team bases, with a ring that fills up in the attackers' color while it's being captured
+    for (const b of bases) {
+      if (!b.alive || !seen(b.x - BASE_R, b.y - BASE_R, BASE_R * 2, BASE_R * 2)) continue;
+      const info = TEAM_INFO[b.team];
       ctx.save();
       ctx.globalAlpha = 0.14; ctx.fillStyle = info.color;
       ctx.beginPath(); ctx.arc(b.x, b.y, BASE_R, 0, Math.PI * 2); ctx.fill();
@@ -1847,6 +1969,12 @@
       ctx.stroke(); ctx.setLineDash([]);
       ctx.globalAlpha = 0.35; ctx.fillStyle = info.color; ctx.font = '900 44px system-ui'; ctx.textAlign = 'center';
       ctx.fillText(info.name.toUpperCase() + ' BASE', b.x, b.y + 16);
+      if (b.cap > 0 && b.capTeam != null) {
+        ctx.globalAlpha = 0.9; ctx.strokeStyle = TEAM_INFO[b.capTeam].color; ctx.lineWidth = 14;
+        ctx.beginPath(); ctx.arc(b.x, b.y, BASE_R + 10, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * b.cap); ctx.stroke();
+        ctx.globalAlpha = 0.85; ctx.fillStyle = TEAM_INFO[b.capTeam].color; ctx.font = '900 30px system-ui';
+        ctx.fillText(`CAPTURING ${Math.round(b.cap * 100)}%`, b.x, b.y + 60);
+      }
       ctx.restore();
     }
 
@@ -2044,17 +2172,28 @@
     // Team totals, under the leaderboard
     if (teamMode) {
       const y0 = 12 + 30 + rowH * rows.length + 8;
-      const scores = TEAM_INFO.slice(0, teamMode).map((info, t) => ({ info, t, k: players.filter(p => p.team === t).reduce((a, p) => a + p.kills, 0) }))
-        .sort((a, b) => b.k - a.k);
-      ctx.fillStyle = 'rgba(0,0,0,.45)'; ctx.fillRect(W - lbW - 12, y0, lbW, 10 + rowH * teamMode);
+      const scores = activeTeams().map(t => ({ info: TEAM_INFO[t], t, n: players.filter(p => p.team === t).length,
+        k: players.filter(p => p.team === t).reduce((a, p) => a + p.kills, 0) })).sort((a, b) => b.n - a.n || b.k - a.k);
+      ctx.fillStyle = 'rgba(0,0,0,.45)'; ctx.fillRect(W - lbW - 12, y0, lbW, 10 + rowH * scores.length);
       ctx.font = 'bold 13px system-ui';
-      scores.forEach(({ info, t, k }, i) => {
+      scores.forEach(({ info, t, n, k }, i) => {
         const y = y0 + 22 + i * rowH;
         ctx.fillStyle = info.color; ctx.fillRect(W - lbW - 2, y - 10, 12, 12);
         ctx.textAlign = 'left'; ctx.fillStyle = me && me.team === t ? '#ffe066' : '#fff';
-        ctx.fillText(`Team ${info.name}${me && me.team === t ? ' (you)' : ''}`, W - lbW + 16, y);
+        ctx.fillText(`${info.name}${me && me.team === t ? ' (you)' : ''} · ${n} 👤`, W - lbW + 16, y);
         ctx.textAlign = 'right'; ctx.fillText(k, W - 22, y);
       });
+      // Alerts: your base is being taken, or you're taking someone's
+      const home = me && bases.find(b => b.alive && b.team === me.team);
+      const taking = me && bases.find(b => b.alive && b.capTeam === me.team && b.cap > 0 && b.team !== me.team);
+      const msg = home && home.cap > 0 && home.capTeam !== me.team ? [`⚠ Your base is being captured! ${Math.round(home.cap * 100)}%`, '#ff4d4d']
+        : taking ? [`Capturing Team ${TEAM_INFO[taking.team].name}'s base: ${Math.round(taking.cap * 100)}%`, TEAM_INFO[me.team].color] : null;
+      if (msg && gameOver == null) {
+        ctx.font = 'bold 16px system-ui'; ctx.textAlign = 'center';
+        const w = ctx.measureText(msg[0]).width + 24, yy = H - (touchMode ? 250 : 120);
+        ctx.fillStyle = 'rgba(0,0,0,.6)'; ctx.fillRect(W / 2 - w / 2, yy - 20, w, 30);
+        ctx.fillStyle = msg[1]; ctx.fillText(msg[0], W / 2, yy);
+      }
     }
 
     // Minimap (bottom-left with a mouse; top-left on touch, where the move stick isn't)
@@ -2128,10 +2267,14 @@
     // Minimap
     const s = mm / WORLD;
     ctx.fillStyle = 'rgba(0,0,0,.45)'; ctx.fillRect(mx0, my0, mm, mm);
-    for (let t = 0; t < teamMode; t++) {
-      const b = basePos(t);
-      ctx.globalAlpha = 0.35; ctx.fillStyle = TEAM_INFO[t].color;
+    for (const b of bases) {
+      if (!b.alive) continue;
+      ctx.globalAlpha = 0.35; ctx.fillStyle = TEAM_INFO[b.team].color;
       ctx.beginPath(); ctx.arc(mx0 + b.x * s, my0 + b.y * s, BASE_R * s, 0, Math.PI * 2); ctx.fill();
+      if (b.cap > 0 && b.capTeam != null) {
+        ctx.globalAlpha = Math.floor(performance.now() / 250) % 2 ? 1 : 0.4; // blinks while being captured
+        ctx.strokeStyle = TEAM_INFO[b.capTeam].color; ctx.lineWidth = 2; ctx.stroke();
+      }
       ctx.globalAlpha = 1;
     }
     ctx.fillStyle = 'rgba(200,200,210,.6)';
@@ -2349,14 +2492,17 @@
     botNames = [...BOT_NAMES].sort(() => Math.random() - 0.5);
     if (mode === 'client') {
       teamMode = opts.teams || 0;
+      setupBases();
       me = makePlayer(name, chosen, false, opts.id);
       me.maxHp = PLAYER_HP; // the host sends everything else
       players.push(me);
     } else if (mode === 'host' && lobby) {
       // Everyone from the lobby, on the teams the host picked
       teamMode = lobby.teams; totalPlayers = Math.max(lobby.total, lobby.people.length);
+      setupBases();
       for (const q of lobby.people) {
         const p = makePlayer(q.name, teamMode ? TEAM_INFO[q.team].color : q.color, false, q.id);
+        p.ownColor = q.color;
         p.team = teamMode ? q.team : null;
         p.remote = q.id !== 'h';
         if (q.id === 'h') me = p;
@@ -2366,6 +2512,7 @@
       rebalanceBots();
     } else {
       teamMode = 0; totalPlayers = NUM_BOTS + 1;
+      setupBases();
       me = makePlayer(name, chosen, false, 'h');
       players.push(me);
       spawn(me);
@@ -2377,6 +2524,7 @@
     netMsg('');
     document.getElementById('menu').style.display = 'none';
     hideLobby();
+    gameOverEl.hidden = true;
     running = true;
     refreshUpdateButton();
   }
@@ -2384,8 +2532,9 @@
   // Back to the menu (the host left, or the connection dropped)
   function endGame(text) {
     running = false;
-    mode = 'solo'; teamMode = 0; lobby = null;
+    mode = 'solo'; teamMode = 0; lobby = null; bases = []; gameOver = null;
     hideLobby();
+    gameOverEl.hidden = true;
     me = null; players = []; balls = [];
     document.getElementById('menu').style.display = '';
     netMsg(text);
@@ -2431,6 +2580,41 @@
     order.forEach((q, i) => { q.team = i % lobby.teams; });
     broadcastLobby();
   }
+  // ---------- Game over ----------
+  const gameOverEl = document.getElementById('gameover');
+  function showGameOver(w) {
+    if (!TEAM_INFO[w]) return;
+    document.getElementById('goTitle').textContent = `🏆 Team ${TEAM_INFO[w].name} wins!`;
+    document.getElementById('goTitle').style.color = TEAM_INFO[w].color;
+    const list = document.getElementById('goList');
+    list.textContent = '';
+    for (const p of [...players].sort((a, b) => b.kills - a.kills).slice(0, 5)) {
+      const li = document.createElement('li');
+      li.textContent = `${p.name}${p === me ? ' (you)' : ''}: ${p.kills} splat${p.kills === 1 ? '' : 's'}`;
+      list.appendChild(li);
+    }
+    document.getElementById('goLobby').hidden = mode !== 'host';
+    document.getElementById('goWait').hidden = mode === 'host';
+    gameOverEl.hidden = false;
+    sound('pick');
+  }
+  // The host takes everyone back to the lobby, keeping the same people (and their own colors)
+  document.getElementById('goLobby').onclick = () => {
+    if (mode !== 'host') return;
+    const people = players.filter(p => !p.isBot).map(p => ({ id: p.id, name: p.name, color: p.ownColor || p.color, team: null }));
+    const teams = teamMode || 2, total = totalPlayers;
+    for (const c of conns) {
+      if (c.player) { c.lobbyId = c.player.id; c.player = null; }
+      try { c.send({ t: 'tolobby' }); } catch (e) { /* dropped */ }
+    }
+    running = false; me = null; players = []; balls = []; bases = []; gameOver = null;
+    gameOverEl.hidden = true;
+    lobby = { teams, total, people: people.filter(q => q.id === 'h' || conns.some(c => c.lobbyId === q.id)) };
+    lobby.people.forEach((q, i) => { q.team = i % teams; });
+    showLobby();
+    broadcastLobby();
+  };
+
   function startHosted() {
     if (!lobby) return;
     startGame('host');

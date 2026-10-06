@@ -65,15 +65,25 @@ Chances are per drop, so a Golden Gun turns up about once every 67 splats.
 2. Friends open the same page, type the code and tap **Join**. They wait in the lobby and see it update live.
 3. The host picks:
    - **Teams:** None (everyone for themselves), 2, 3 or 4
-   - **Players:** the total, people plus bots (2–24). Bots fill whatever spots people don't.
+   - **Players:** the total, people plus bots (2–30). Bots fill whatever spots people don't.
    - **Who's on which team:** tap a team color next to each person, or **Shuffle teams**.
      New arrivals go to the smallest team.
 4. The host taps **Start game**.
 
 **Team games:** everyone wears their team's color and always spawns at their team's base (2 teams
 face off left and right, 3 sit in a triangle, 4 on all sides). Teammates can't splat each other, and
-the leaderboard shows team totals. A friend who joins mid-game goes to the team with the fewest people
-and takes a bot's spot. Up to 8 people can play at once.
+the leaderboard shows each team's size and splats.
+
+**Capturing bases:** get more of your team inside an enemy base than they have defending it and a
+capture ring fills up in your color (about 8 seconds, faster with a bigger edge). More defenders than
+attackers drains it; a tie holds it. When the ring fills, that base is gone and its whole team switches
+to yours. The game ends when only one team is left; the host can then take everyone back to the lobby
+for another round. Bots play the objective too: most attack the nearest enemy base, some guard home,
+and they all rush back when their base is under attack.
+
+A friend who joins mid-game goes to the team with the fewest people and takes a bot's spot.
+Up to 8 people can play at once (the rest of the 30 spots are bots), since the host's device sends
+the game to every friend.
 
 This is peer-to-peer: the host's device runs the game and friends connect straight to it, using the
 free PeerJS service to find each other. Nobody needs an account. If the host leaves, the game ends for
