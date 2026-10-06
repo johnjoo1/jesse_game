@@ -31,8 +31,8 @@ these standing; placing a 4th removes their oldest. The others run on a timer:
 
 | Defense | Chance | What it does |
 |---|---|---|
-| ▮ Barricade | 12% | A wall across your line of fire. Blocks enemy paint, but yours flies through it. Stays until it takes 8 hits |
-| ✚ Heal Station | 9% | Stand in it to heal 1 health every 1.5s. Lasts 20s |
+| ▮ Barricade | 12% | A wall across your line of fire that anyone can hide behind: it blocks everyone's paint, yours included. Stays until it takes 8 hits |
+| ✚ Heal Station | 9% | Heals anyone standing in it (friend, foe or bot) 1 health every 1.5s. Lasts 20s |
 | ◠ Shield Dome | 7% | Enemy paint can't get in; you can shoot out. Lasts 10s |
 | ⊕ Sentry Turret | 6% | Shoots enemies within range; its splats count for you. Stays until it takes 5 hits |
 
@@ -45,7 +45,6 @@ Tap **Team up** next to someone; they get a pop-up to **Accept** (Y) or say **No
 
 Teammates:
 - can't splat each other: their paint passes straight through
-- can shoot through each other's barricades, and heal at each other's heal stations
 - aren't targeted by each other's turrets, and show as green dots on each other's minimap
 - have a green dashed ring and 🤝 by their name
 

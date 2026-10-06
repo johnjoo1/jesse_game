@@ -125,8 +125,8 @@
 <div id="teamPanel" hidden>
   <div class="tcard" role="dialog" aria-labelledby="teamTitle">
     <div class="thead"><h2 id="teamTitle">Teams</h2><button id="teamClose" aria-label="Close">✕</button></div>
-    <p class="tnote">Teammates' paint passes through each other. You also share barricades and heal stations,
-      turrets won't shoot your teammate, and teammates show on your minimap. Leaving a team takes 3 seconds.</p>
+    <p class="tnote">Teammates' paint passes through each other, turrets won't shoot your teammate,
+      and teammates show on your minimap. Leaving a team takes 3 seconds.</p>
     <ul id="teamList"></ul>
   </div>
 </div>
@@ -192,8 +192,8 @@
     triple: { w: 9,  name: 'Triple Shot',   icon: '⁂', color: '#ff8a3d', desc: 'Every shot fires 3 paintballs' },
     golden: { w: 3,  name: 'Golden Gun',    icon: '★', color: '#ffc800', desc: 'Every hit counts double' },
     // Defenses: blue-green family so they read as "protect" from across the map
-    wall:   { w: 12, place: true, name: 'Barricade',     icon: '▮', color: '#a0b4c8', desc: 'A wall that blocks paintballs until it takes 8 hits' },
-    heal:   { w: 9,  place: true, name: 'Heal Station',  icon: '✚', color: '#3dff8b', desc: 'Stand in it to heal (20s)' },
+    wall:   { w: 12, place: true, name: 'Barricade',     icon: '▮', color: '#a0b4c8', desc: 'A wall anyone can hide behind, until it takes 8 hits' },
+    heal:   { w: 9,  place: true, name: 'Heal Station',  icon: '✚', color: '#3dff8b', desc: 'Heals anyone standing in it (20s)' },
     dome:   { w: 7,  place: true, name: 'Shield Dome',   icon: '◠', color: '#7fd4ff', desc: "Enemy paint can't get in (10s)" },
     turret: { w: 6,  place: true, name: 'Sentry Turret', icon: '⊕', color: '#c78bff', desc: 'Shoots enemies near it until it takes 5 hits' },
   };
@@ -377,9 +377,8 @@
     const t = clamp(((cx - x1) * dx + (cy - y1) * dy) / l2, 0, 1);
     return dist2(x1 + dx * t, y1 + dy * t, cx, cy) < r * r;
   }
-  // ownerId: that player's (and their teammates') barricades don't block their paint
-  function lineOfSight(x1, y1, x2, y2, ownerId) {
-    for (const r of rects) if ((!r.dep || ownerId === undefined || !friendly(r.dep.owner, ownerId)) && segRect(x1, y1, x2, y2, r)) return false;
+  function lineOfSight(x1, y1, x2, y2) {
+    for (const r of rects) if (segRect(x1, y1, x2, y2, r)) return false;
     for (const o of rocks) if (segCircle(x1, y1, x2, y2, o.x, o.y, o.r)) return false;
     return true;
   }
@@ -444,7 +443,7 @@
     for (const off of p.buffs.triple ? [-0.16, 0, 0.16] : [0]) {
       const a = p.aim + off + rand(-SPREAD, SPREAD);
       const sx = p.x + Math.cos(a) * (PLAYER_R + 8), sy = p.y + Math.sin(a) * (PLAYER_R + 8);
-      if (!lineOfSight(p.x, p.y, sx, sy, p.id)) { fx({ t: 'sp', x: sx, y: sy, c: p.color, s: 7 }); continue; }
+      if (!lineOfSight(p.x, p.y, sx, sy)) { fx({ t: 'sp', x: sx, y: sy, c: p.color, s: 7 }); continue; }
       balls.push({ x: sx, y: sy, vx: Math.cos(a) * BALL_SPEED, vy: Math.sin(a) * BALL_SPEED, life: BALL_LIFE, owner: p, color, dmg: p.buffs.golden ? 2 : 1 });
     }
     if (p.ammo === 0) startReload(p);
@@ -571,9 +570,9 @@
       if ((timed && d.ttl <= 0) || (DEPLOY[d.type].hp && d.hp <= 0)) { removeDeploy(d, !timed || d.ttl > 0); continue; }
       const owner = players.find(q => q.id === d.owner);
       if (d.type === 'heal') {
-        // Heals its owner and their teammates
+        // Heals anyone standing in it, friend or foe
         for (const q of players) {
-          if (!q.alive || !friendly(q.id, d.owner) || dist2(q.x, q.y, d.x, d.y) >= DEPLOY.heal.r ** 2) continue;
+          if (!q.alive || dist2(q.x, q.y, d.x, d.y) >= DEPLOY.heal.r ** 2) continue;
           q.healT += dt;
           if (q.healT >= 1.5 && q.hp < q.maxHp) { q.healT = 0; q.hp++; fx({ t: 'heal', p: q.id, x: q.x, y: q.y }); }
         }
@@ -584,7 +583,7 @@
         for (const o of players) {
           if (friendly(o.id, d.owner) || !o.alive || o.shield > 0) continue;
           const dd = dist2(d.x, d.y, o.x, o.y);
-          if (dd > bestD || (inBush(o) && dd > 110 * 110) || !lineOfSight(d.x, d.y, o.x, o.y, d.owner)) continue;
+          if (dd > bestD || (inBush(o) && dd > 110 * 110) || !lineOfSight(d.x, d.y, o.x, o.y)) continue;
           best = o; bestD = dd;
         }
         if (best) {
@@ -855,14 +854,14 @@
         const d = dist2(b.x, b.y, o.x, o.y);
         if (d > bestD) continue;
         if (inBush(o) && d > 110 * 110) continue;
-        if (!lineOfSight(b.x, b.y, o.x, o.y, b.id)) continue;
+        if (!lineOfSight(b.x, b.y, o.x, o.y)) continue;
         best = o; bestD = d;
       }
       // Enemy turrets are fair game too (otherwise they'd never come down)
       for (const t of deploys) {
         if (t.type !== 'turret' || t.owner === b.id) continue;
         const d = dist2(b.x, b.y, t.x, t.y);
-        if (d < bestD && lineOfSight(b.x, b.y, t.x, t.y, b.id)) { best = t; bestD = d; }
+        if (d < bestD && lineOfSight(b.x, b.y, t.x, t.y)) { best = t; bestD = d; }
       }
       if (best && best !== b.target) b.reactT = rand(0.5, 0.9); // reaction delay on new target
       b.target = best;
@@ -902,8 +901,9 @@
         if (slot >= 0) useItem(b, slot);
       }
     } else {
-      const d = drops.find(d => dist2(b.x, b.y, d.x, d.y) < 300 * 300 && lineOfSight(b.x, b.y, d.x, d.y));
-      if (d) b.wanderA = Math.atan2(d.y - b.y, d.x - b.x);
+      const heal = b.hp < b.maxHp && deploys.find(d => d.type === 'heal' && dist2(b.x, b.y, d.x, d.y) < 600 * 600);
+      const d = heal || drops.find(d => dist2(b.x, b.y, d.x, d.y) < 300 * 300 && lineOfSight(b.x, b.y, d.x, d.y));
+      if (d && !(heal && dist2(b.x, b.y, d.x, d.y) < 30 * 30)) b.wanderA = Math.atan2(d.y - b.y, d.x - b.x);
       mx = Math.cos(b.wanderA); my = Math.sin(b.wanderA);
       b.aim = b.wanderA;
       if (b.ammo < b.magSize) startReload(b);
@@ -923,7 +923,7 @@
       if (inBush(o) && dist2(p.x, p.y, o.x, o.y) > 110 * 110) continue;
       const oa = Math.atan2(o.y - p.y, o.x - p.x);
       const diff = Math.abs(Math.atan2(Math.sin(oa - a), Math.cos(oa - a)));
-      if (diff < bestDiff && lineOfSight(p.x, p.y, o.x, o.y, p.id)) { best = oa; bestDiff = diff; }
+      if (diff < bestDiff && lineOfSight(p.x, p.y, o.x, o.y)) { best = oa; bestDiff = diff; }
     }
     return best;
   }
@@ -1044,18 +1044,18 @@
       bl.x += bl.vx * dt; bl.y += bl.vy * dt;
       bl.life -= dt;
       let dead = false;
-      if (!lineOfSight(ox, oy, bl.x, bl.y, bl.owner.id) || bl.x < 0 || bl.y < 0 || bl.x > WORLD || bl.y > WORLD) {
+      if (!lineOfSight(ox, oy, bl.x, bl.y) || bl.x < 0 || bl.y < 0 || bl.x > WORLD || bl.y > WORLD) {
         // Binary search back along the step for the impact point
         const ex = bl.x, ey = bl.y;
         let lo = 0, hi = 1;
         for (let s = 0; s < 6; s++) {
           const mid = (lo + hi) / 2;
-          if (lineOfSight(ox, oy, ox + (ex - ox) * mid, oy + (ey - oy) * mid, bl.owner.id)) lo = mid; else hi = mid;
+          if (lineOfSight(ox, oy, ox + (ex - ox) * mid, oy + (ey - oy) * mid)) lo = mid; else hi = mid;
         }
         bl.x = ox + (ex - ox) * lo; bl.y = oy + (ey - oy) * lo;
         fx({ t: 'imp', x: bl.x, y: bl.y, c: bl.color });
         dead = true;
-        // Did it hit a barricade? (Your own paint flies through your own, so this is always an enemy's.)
+        // Did it hit a barricade? Any paint wears one down, its owner's included.
         const ix = bl.x + bl.vx * 0.012, iy = bl.y + bl.vy * 0.012;
         const wall = deploys.find(d => d.type === 'wall' &&
           Math.abs(ix - d.x) <= d.w / 2 + 2 && Math.abs(iy - d.y) <= d.h / 2 + 2);
