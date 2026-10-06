@@ -404,7 +404,7 @@
         let mx = (keys.KeyD || keys.ArrowRight ? 1 : 0) - (keys.KeyA || keys.ArrowLeft ? 1 : 0);
         let my = (keys.KeyS || keys.ArrowDown ? 1 : 0) - (keys.KeyW || keys.ArrowUp ? 1 : 0);
         const l = Math.hypot(mx, my) || 1;
-        p.aim = Math.atan2(mouseY - H / 2, mouseX - W / 2);
+        p.aim = Math.atan2(mouseY + camY - p.y, mouseX + camX - p.x);
         movePlayer(p, mx / l, my / l, keys.ShiftLeft || keys.ShiftRight, dt);
         if (mouseDown) shoot(p);
       } else {
@@ -527,6 +527,9 @@
       const tx = me.x - W / 2, ty = me.y - H / 2;
       camX += (tx - camX) * 0.2; camY += (ty - camY) * 0.2;
     }
+    // Keep the camera inside the arena so the empty area past the edge never fills the screen
+    camX = W >= WORLD ? (WORLD - W) / 2 : clamp(camX, 0, WORLD - W);
+    camY = H >= WORLD ? (WORLD - H) / 2 : clamp(camY, 0, WORLD - H);
     ctx.fillStyle = '#152017'; ctx.fillRect(0, 0, W, H);
     ctx.save();
     ctx.translate(-Math.round(camX), -Math.round(camY));
