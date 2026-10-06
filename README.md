@@ -6,6 +6,23 @@ Open `index.html` in a browser. Nothing needs to be installed.
 
 **Play online:** https://johnjoo1.github.io/jesse_game/ (once GitHub Pages is turned on, see below)
 
+## Power-ups
+
+Half of all splats drop a power-up where the player went down. Walk over it to grab it.
+It lasts until you get splatted, and bots grab them too. Unclaimed drops fade after 20 seconds.
+
+| Power-up | Chance | What it does |
+|---|---|---|
+| ♥ Extra Heart | 30% | +1 max health (up to +3) and a full heal |
+| ⚡ Rapid Fire | 20% | Shoot twice as fast |
+| » Speed Boots | 15% | Run 30% faster |
+| ▤ Big Hopper | 15% | 24 paintballs and faster reloads |
+| ⁂ Triple Shot | 10% | Every shot fires 3 paintballs |
+| ◯ Bubble Shield | 7% | Blocks the next 3 hits |
+| ★ Golden Gun | 3% | Every hit counts double |
+
+Chances are per drop. With half of splats dropping something, a Golden Gun turns up about once every 67 splats.
+
 ## Playing with friends
 
 1. One person taps **Host a game**. A 4-letter room code shows at the top of their screen.
