@@ -27,22 +27,30 @@ a mouse or keyboard hides them. On small screens the view zooms out and the on-s
 
 ## Brain Boost (learning)
 
-Pick **Learning** on the start screen: Off, Math, Spanish or Mix (the default). It's saved on each
-device, so each kid can have their own. With it on, getting splatted shows a quick question with
-3 big answer buttons (or press 1, 2, 3). Questions are pitched at about age 7.
+Pick **Learning** on the start screen (Off, Math, Spanish or Mix) and an **Age** (7, 8, 9 or 10).
+Both are saved on each device, so each kid can have their own. With learning on, getting splatted
+shows a question at that age's level, with 3 big answer buttons (or press 1, 2, 3).
 
 - **No rush:** the respawn countdown waits while the question is up.
 - **Right answer:** a reward screen shows the prize you won and what it does; tap **Let's go!**
   (or press Enter) to jump back in with it.
 - **Wrong answer:** no penalty. The card shows the right answer; tap **OK, back in!** to keep playing.
+- **⭐ Challenge questions:** about 1 in 4 questions is one grade harder, on a purple card. Get it
+  right to pick a **super prize**: Golden Gun, Sentry Turret, Triple Shot or Shield Dome. Missing a
+  challenge doesn't count against you.
 - **3 in a row:** pick your own prize, a boost or a defense.
-- **Two misses in a row:** the next few questions are easier.
-- Your score shows as 🧠 right/total in the corner and on the win screen.
+- **Two misses in a row:** the next few questions are a grade easier.
+- Your score shows as 🧠 right/total in the corner, and on the win screen with your ⭐ challenges.
 
-| | Questions |
-|---|---|
-| Math | Adding within 10 and 20, taking away within 20, missing numbers (5 + ? = 9), counting pictures, biggest number |
-| Spanish | Picture → word (animals, food, things), colors, numbers 0–10 both ways, simple words (hola, gracias, por favor). A 🔊 button reads Spanish aloud, and the right word is spoken after each answer. |
+| Level | Math | Spanish |
+|---|---|---|
+| 7 | Adding within 20, taking away within 20, missing numbers (5 + ? = 9), counting pictures, biggest number | Picture → word (animals, food, things), colors, numbers 0–10, hola / gracias / por favor |
+| 8 | Adding and taking away within 100, ×2 ×5 ×10, counting by 2s, 5s, 10s, halves, biggest 3-digit number | Numbers 11–20, days of the week, family, body parts, weather |
+| 9 | Times tables, division facts, adding within 1,000, rounding to the nearest ten, ? × 4 = 28 | Counting by tens (veinte, treinta…), months, school things, action words, opposites |
+| 10 | 2-digit × 1-digit, dividing 2- and 3-digit numbers, fractions of a number, adding fractions, place value | Everyday phrases (Tengo hambre), clothing, numbers 21–99 |
+| 11 (challenges at age 10) | Decimals, fractions and percentages of a number, order of operations, 2-digit × 2-digit | Short sentences, question words (¿Dónde?), yo como / tú comes |
+
+A 🔊 button reads Spanish aloud, and the right word is spoken after each answer.
 
 ## Power-ups
 

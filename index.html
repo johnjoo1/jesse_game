@@ -121,6 +121,9 @@
   .learn .seg button { border: 0; background: #fff; padding: 6px 10px; font: 700 13px system-ui, sans-serif; cursor: pointer; }
   .learn .seg button + button { border-left: 2px solid #222; }
   .learn .seg button.on { background: #222; color: #fff; }
+  .agerow { display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 13px; }
+  .bcard.challenge { border-color: #b03dff; box-shadow: 0 0 0 4px rgba(176, 61, 255, .25), 0 12px 40px rgba(0,0,0,.45); }
+  .btag .star { color: #b03dff; }
   #brain { position: fixed; inset: 0; z-index: 12; display: flex; align-items: center; justify-content: center; pointer-events: none; }
   .bcard { pointer-events: auto; background: #fffdf5; color: #222; border: 4px solid #ffd23d; border-radius: 20px; padding: 14px 18px 16px;
     width: min(440px, calc(100vw - 32px)); max-height: calc(100vh - 24px); overflow: auto; box-shadow: 0 12px 40px rgba(0,0,0,.45);
@@ -233,9 +236,13 @@
       Tap <b>⟳</b> to reload &nbsp;·&nbsp; <b>»</b> to sprint &nbsp;·&nbsp; a defense's button to place it
     </div>
     <div class="learn">
-      <div class="llab">🧠 Brain Boost <small>questions when you respawn (ages 6–8)</small></div>
+      <div class="llab">🧠 Brain Boost <small>questions when you respawn</small></div>
       <div class="seg" id="learnSeg">
         <button data-v="off">Off</button><button data-v="math">Math</button><button data-v="spanish">Spanish</button><button data-v="mix">Mix</button>
+      </div>
+      <div class="agerow" id="ageRow">
+        <span>Age</span>
+        <div class="seg" id="ageSeg"><button data-v="7">7</button><button data-v="8">8</button><button data-v="9">9</button><button data-v="10">10</button></div>
       </div>
     </div>
     <div id="rotate">Turn your phone sideways for the best view</div>
@@ -2529,7 +2536,11 @@
   const brainEl = document.getElementById('brain');
   let learnMode = 'mix';
   try { learnMode = localStorage.getItem('pbwLearn') || 'mix'; } catch (e) { /* storage blocked */ }
-  let brainOk = 0, brainAll = 0, brainStreak = 0, brainMisses = 0, brainEasy = 0;
+  let brainOk = 0, brainAll = 0, brainStreak = 0, brainMisses = 0, brainEasy = 0, brainStars = 0;
+  let brainAge = 7;
+  try { brainAge = +localStorage.getItem('pbwAge') || 7; } catch (e) { /* storage blocked */ }
+  const CHALLENGE_CHANCE = 0.25;  // about 1 question in 4 is a grade harder, for a super prize
+  const SUPER_PRIZES = ['golden', 'turret', 'triple', 'dome'];
   let brainQ = null, brainState = 'off', brainWasAlive = true;
 
   const ri = (a, b) => a + Math.floor(Math.random() * (b - a + 1));
@@ -2542,6 +2553,7 @@
   }
 
   // Questions as { q, pic, swatch, opts: [{ label, sub, color, big }], answer, say, explain }
+  // Levels 6 and 7 (the original "easier" and "normal" sets)
   function mathQuestion(easy) {
     const kinds = easy ? ['add10', 'add10', 'count'] : ['add20', 'add20', 'sub', 'sub', 'count', 'bigger', 'missing', 'add10'];
     const k = pick(kinds);
@@ -2617,11 +2629,149 @@
     return { q: `What does “${item[0]}” mean?`, sayPrompt: item[0], opts: opts.map(o => ({ label: o[1] })), answer: opts.indexOf(item), say: item[0],
       explain: `${item[0]} = ${item[1]}` };
   }
+  // ----- Harder levels (8 = about 3rd grade … 11 = about 6th grade) -----
+  // A question with text answers: the right one plus two wrong ones
+  function textQ(q, right, wrongs, explain, extra = {}) {
+    let pool = shuffle([...new Set(wrongs.filter(w => w !== right))]);
+    if (pool.length < 2 && typeof right === 'number') pool = [...new Set([...pool, ...nearNums(right)])]; // wrong answers came out equal: top up
+    const opts = shuffle([right, ...pool.slice(0, 2)]);
+    return { q, opts: opts.map(o => ({ label: String(o) })), answer: opts.indexOf(right), explain, ...extra };
+  }
+  // Wrong answers that look plausible for bigger numbers (off by 1, 2 or 10)
+  function nearNums(ans, min = 0) {
+    return shuffle([ans + 1, ans - 1, ans + 2, ans - 2, ans + 10, ans - 10].filter(x => x >= min && x !== ans));
+  }
+  const numQ = (q, ans, explain, extra) => textQ(q, ans, nearNums(ans), explain, extra);
+
+  function mathLevel(level) {
+    if (level <= 7) return mathQuestion(level <= 6);
+    if (level === 8) {
+      const k = pick(['add', 'add', 'sub', 'sub', 'times', 'skip', 'biggest', 'half']);
+      if (k === 'add') { const a = ri(12, 79), b = ri(5, 99 - a); return numQ(`${a} + ${b} = ?`, a + b, `${a} + ${b} = ${a + b}`); }
+      if (k === 'sub') { const a = ri(25, 99), b = ri(5, a - 5); return numQ(`${a} − ${b} = ?`, a - b, `${a} − ${b} = ${a - b}`); }
+      if (k === 'times') { const a = pick([2, 5, 10]), b = ri(1, 10); return numQ(`${a} × ${b} = ?`, a * b, `${a} × ${b} = ${a * b}`); }
+      if (k === 'skip') {
+        const st = pick([2, 5, 10]), s0 = st * ri(1, 6), seq = [s0, s0 + st, s0 + 2 * st];
+        return textQ(`What comes next? ${seq.join(', ')}, …`, s0 + 3 * st, [s0 + 3 * st + 1, s0 + 4 * st, s0 + 2 * st + 1, s0 + 3 * st - 1], `Counting by ${st}s: ${s0 + 3 * st}`);
+      }
+      if (k === 'biggest') {
+        const set = new Set(); while (set.size < 3) set.add(ri(100, 999));
+        const nums = [...set], max = Math.max(...nums);
+        return textQ('Which number is the biggest?', max, nums.filter(n => n !== max), `${max} is the biggest`);
+      }
+      const n = 2 * ri(2, 15); return numQ(`What is half of ${n}?`, n / 2, `Half of ${n} is ${n / 2}`);
+    }
+    if (level === 9) {
+      const k = pick(['times', 'times', 'divide', 'divide', 'add', 'round', 'missing']);
+      if (k === 'times') { const a = ri(3, 10), b = ri(3, 10); return textQ(`${a} × ${b} = ?`, a * b, [a * b + a, a * b - b, a * b + 1, a + b], `${a} × ${b} = ${a * b}`); }
+      if (k === 'divide') { const b = ri(2, 10), c = ri(2, 10); return numQ(`${b * c} ÷ ${b} = ?`, c, `${b * c} ÷ ${b} = ${c}`); }
+      if (k === 'add') { const a = ri(120, 600), b = ri(110, 999 - a); return textQ(`${a} + ${b} = ?`, a + b, [a + b + 10, a + b - 10, a + b + 100, a + b - 1], `${a} + ${b} = ${a + b}`); }
+      if (k === 'round') {
+        let n = ri(11, 99); if (n % 10 === 5 || n % 10 === 0) n++;
+        const r10 = Math.round(n / 10) * 10, other = r10 > n ? r10 - 10 : r10 + 10;
+        return textQ(`Round ${n} to the nearest ten`, r10, [other, r10 + 10, n], `${n} rounds to ${r10}`);
+      }
+      const a = ri(3, 9), b = ri(3, 9); return numQ(`? × ${a} = ${a * b}`, b, `${b} × ${a} = ${a * b}`);
+    }
+    if (level === 10) {
+      const k = pick(['mul', 'mul', 'div', 'frac', 'frac', 'addfrac', 'place']);
+      if (k === 'mul') { const a = ri(12, 49), b = ri(2, 9); return textQ(`${a} × ${b} = ?`, a * b, [a * b + 10, a * b - b, a * b + 1, a * (b + 1)], `${a} × ${b} = ${a * b}`); }
+      if (k === 'div') { const c = ri(11, 25), b = ri(2, 5); return numQ(`${b * c} ÷ ${b} = ?`, c, `${b * c} ÷ ${b} = ${c}`); }
+      if (k === 'frac') { const d = pick([2, 3, 4, 5]), n = d * ri(2, 10); return numQ(`What is 1/${d} of ${n}?`, n / d, `${n} ÷ ${d} = ${n / d}`); }
+      if (k === 'addfrac') {
+        const d = ri(4, 9), a = ri(1, d - 2), b = ri(1, d - 1 - a);
+        return textQ(`${a}/${d} + ${b}/${d} = ?`, `${a + b}/${d}`, [`${a + b}/${d * 2}`, `${a * b}/${d}`, `${a + b + 1}/${d}`], `${a}/${d} + ${b}/${d} = ${a + b}/${d}`);
+      }
+      const n = ri(1000, 9999), digits = String(n), place = pick([['ones', 3], ['tens', 2], ['hundreds', 1], ['thousands', 0]]);
+      const right = digits[place[1]];
+      return textQ(`Which digit is in the ${place[0]} place of ${n.toLocaleString('en-US')}?`, right, digits.split('').filter(d => d !== right).concat(['0', '9']), `The ${place[0]} digit is ${right}`);
+    }
+    const k = pick(['dec', 'dec', 'fracOf', 'percent', 'order', 'mul2']);
+    if (k === 'dec') {
+      const a = ri(11, 59) / 10, b = ri(11, 39) / 10, sum = Math.round((a + b) * 10) / 10, f = (x) => x.toFixed(1);
+      return textQ(`${f(a)} + ${f(b)} = ?`, f(sum), [f(sum + 0.1), f(sum - 0.1), f(sum + 1), f(sum - 1)], `${f(a)} + ${f(b)} = ${f(sum)}`);
+    }
+    if (k === 'fracOf') { const d = pick([4, 5, 10]), t = pick({ 4: [3], 5: [2, 3, 4], 10: [3, 7, 9] }[d]), n = d * ri(2, 8); return numQ(`What is ${t}/${d} of ${n}?`, n / d * t, `${n} ÷ ${d} × ${t} = ${n / d * t}`); }
+    if (k === 'percent') { const pc = pick([10, 25, 50]), n = (100 / pc) * ri(2, 12); return numQ(`What is ${pc}% of ${n}?`, n * pc / 100, `${pc}% of ${n} is ${n * pc / 100}`); }
+    if (k === 'order') { const a = ri(2, 9), b = ri(2, 6), c = ri(2, 6); return textQ(`${a} + ${b} × ${c} = ?`, a + b * c, [(a + b) * c, a + b + c, a * b + c], `Multiply first: ${b} × ${c} = ${b * c}, then + ${a} = ${a + b * c}`); }
+    const a = ri(11, 15), b = ri(11, 15); return textQ(`${a} × ${b} = ?`, a * b, [a * b + 10, a * b - 10, a * b + 1, a * b - a], `${a} × ${b} = ${a * b}`);
+  }
+
+  // Spanish word lists for the harder levels: [spanish, english, picture]
+  const ES2 = {
+    family: [['madre', 'mother', '👩'], ['padre', 'father', '👨'], ['hermano', 'brother', '👦'], ['hermana', 'sister', '👧'],
+      ['abuela', 'grandma', '👵'], ['abuelo', 'grandpa', '👴'], ['bebé', 'baby', '👶']],
+    body: [['cabeza', 'head', '🙂'], ['mano', 'hand', '✋'], ['pie', 'foot', '🦶'], ['ojo', 'eye', '👁️'], ['boca', 'mouth', '👄'],
+      ['nariz', 'nose', '👃'], ['oreja', 'ear', '👂'], ['diente', 'tooth', '🦷']],
+    weather: [['lluvia', 'rain', '🌧️'], ['nieve', 'snow', '❄️'], ['viento', 'wind', '💨'], ['nube', 'cloud', '☁️'], ['sol', 'sun', '☀️'], ['frío', 'cold', '🥶']],
+    school: [['lápiz', 'pencil', '✏️'], ['mochila', 'backpack', '🎒'], ['maestra', 'teacher', '👩‍🏫'], ['escuela', 'school', '🏫'],
+      ['tijeras', 'scissors', '✂️'], ['regla', 'ruler', '📏'], ['libro', 'book', '📖']],
+    verbs: [['comer', 'to eat', '🍽️'], ['dormir', 'to sleep', '😴'], ['correr', 'to run', '🏃'], ['nadar', 'to swim', '🏊'],
+      ['leer', 'to read', '📖'], ['cantar', 'to sing', '🎤'], ['bailar', 'to dance', '💃'], ['beber', 'to drink', '🥤']],
+    clothes: [['camisa', 'shirt', '👕'], ['zapatos', 'shoes', '👟'], ['sombrero', 'hat', '👒'], ['pantalones', 'pants', '👖'],
+      ['calcetines', 'socks', '🧦'], ['vestido', 'dress', '👗'], ['chaqueta', 'jacket', '🧥']],
+  };
+  const DAYS = [['lunes', 'Monday'], ['martes', 'Tuesday'], ['miércoles', 'Wednesday'], ['jueves', 'Thursday'], ['viernes', 'Friday'], ['sábado', 'Saturday'], ['domingo', 'Sunday']];
+  const MONTHS = [['enero', 'January'], ['febrero', 'February'], ['marzo', 'March'], ['abril', 'April'], ['mayo', 'May'], ['junio', 'June'],
+    ['julio', 'July'], ['agosto', 'August'], ['septiembre', 'September'], ['octubre', 'October'], ['noviembre', 'November'], ['diciembre', 'December']];
+  const OPPOSITES = [['grande', 'big'], ['pequeño', 'small'], ['rápido', 'fast'], ['lento', 'slow'], ['feliz', 'happy'], ['triste', 'sad'],
+    ['alto', 'tall'], ['bajo', 'short'], ['caliente', 'hot'], ['frío', 'cold']];
+  const PHRASES2 = [['Tengo hambre', "I'm hungry"], ['Tengo sed', "I'm thirsty"], ['Me llamo Ana', 'My name is Ana'], ['¿Cómo estás?', 'How are you?'],
+    ['Estoy cansado', "I'm tired"], ['¿Dónde está el baño?', 'Where is the bathroom?'], ['Hace frío', "It's cold"], ['Te quiero', 'I love you'],
+    ['¿Cuántos años tienes?', 'How old are you?']];
+  const SENTENCES = [['El perro es grande', 'The dog is big'], ['La casa es roja', 'The house is red'], ['Yo como pan', 'I eat bread'],
+    ['Ella lee un libro', 'She reads a book'], ['Mi gato duerme', 'My cat sleeps'], ['Nosotros jugamos', 'We play'], ['Hoy hace sol', "Today it's sunny"],
+    ['Tú corres rápido', 'You run fast']];
+  const QWORDS = [['¿Qué?', 'What?'], ['¿Quién?', 'Who?'], ['¿Dónde?', 'Where?'], ['¿Cuándo?', 'When?'], ['¿Por qué?', 'Why?'], ['¿Cuántos?', 'How many?']];
+  const CONJ = [['yo como', 'I eat'], ['tú comes', 'you eat'], ['él come', 'he eats'], ['yo bebo', 'I drink'], ['ella bebe', 'she drinks'], ['yo corro', 'I run'], ['tú corres', 'you run']];
+  const TEENS = ['once', 'doce', 'trece', 'catorce', 'quince', 'dieciséis', 'diecisiete', 'dieciocho', 'diecinueve', 'veinte'];
+  const TENS = { 20: 'veinte', 30: 'treinta', 40: 'cuarenta', 50: 'cincuenta', 60: 'sesenta', 70: 'setenta', 80: 'ochenta', 90: 'noventa', 100: 'cien' };
+  const VEINTI = ['veintiuno', 'veintidós', 'veintitrés', 'veinticuatro', 'veinticinco', 'veintiséis', 'veintisiete', 'veintiocho', 'veintinueve'];
+  function numEs(n) {
+    if (n <= 10) return NUMS_ES[n];
+    if (n <= 20) return TEENS[n - 11];
+    if (n < 30) return VEINTI[n - 21];
+    return n % 10 ? `${TENS[n - n % 10]} y ${NUMS_ES[n % 10]}` : TENS[n];
+  }
+  // Generic Spanish question kinds over a [spanish, english, picture?] list
+  const meaningQ = (list) => { const it = pick(list), o = threeFrom(list, it);
+    return { q: `What does “${it[0]}” mean?`, sayPrompt: it[0], say: it[0], opts: o.map(x => ({ label: x[1] })), answer: o.indexOf(it), explain: `${it[0]} = ${it[1]}` }; };
+  const sayItQ = (list) => { const it = pick(list), o = threeFrom(list, it);
+    return { q: `How do you say “${it[1]}” in Spanish?`, say: it[0], opts: o.map(x => ({ label: x[0] })), answer: o.indexOf(it), explain: `${it[1]} = ${it[0]}` }; };
+  const picQ = (list) => { const it = pick(list), o = threeFrom(list, it);
+    return Math.random() < 0.5
+      ? { q: 'What is it in Spanish?', pic: it[2], say: it[0], opts: o.map(x => ({ label: x[0] })), answer: o.indexOf(it), explain: `${it[2]} = ${it[0]} (${it[1]})` }
+      : { q: `Which one is “${it[0]}”?`, sayPrompt: it[0], say: it[0], opts: o.map(x => ({ label: x[2], big: true })), answer: o.indexOf(it), explain: `${it[0]} = ${it[2]} ${it[1]}` }; };
+  const numberQ = (lo, hi) => {
+    const n = ri(lo, hi), wrong = shuffle([n + 1, n - 1, n + 10, n - 10, n + 2].filter(x => x >= lo - 2 && x <= hi && x !== n && x > 0)).slice(0, 2);
+    const o = shuffle([n, ...wrong]);
+    return Math.random() < 0.5
+      ? { q: `What number is “${numEs(n)}”?`, sayPrompt: numEs(n), say: numEs(n), opts: o.map(x => ({ label: String(x) })), answer: o.indexOf(n), explain: `${numEs(n)} = ${n}` }
+      : { q: `How do you say ${n} in Spanish?`, say: numEs(n), opts: o.map(x => ({ label: numEs(x) })), answer: o.indexOf(n), explain: `${n} = ${numEs(n)}` }; };
+
+  // Counting by tens: wrong answers are other tens, never made-up numbers.
+  // (Fraction questions above use fractions in simplest form, like 3/4 or 7/10.)
+  const tensQ = () => {
+    const n = 10 * ri(2, 10), o = shuffle([n, ...shuffle(Object.keys(TENS).map(Number).filter(x => x !== n)).slice(0, 2)]);
+    return Math.random() < 0.5
+      ? { q: `What number is “${TENS[n]}”?`, sayPrompt: TENS[n], say: TENS[n], opts: o.map(x => ({ label: String(x) })), answer: o.indexOf(n), explain: `${TENS[n]} = ${n}` }
+      : { q: `How do you say ${n} in Spanish?`, say: TENS[n], opts: o.map(x => ({ label: TENS[x] })), answer: o.indexOf(n), explain: `${n} = ${TENS[n]}` }; };
+  function spanishLevel(level) {
+    if (level <= 7) return spanishQuestion(level <= 6);
+    if (level === 8) return pick([() => numberQ(11, 20), () => numberQ(11, 20), () => meaningQ(DAYS), () => picQ(ES2.family), () => picQ(ES2.body), () => picQ(ES2.weather), () => spanishQuestion(false)])();
+    if (level === 9) return pick([tensQ, () => meaningQ(MONTHS), () => sayItQ(MONTHS), () => picQ(ES2.school), () => picQ(ES2.verbs), () => meaningQ(ES2.verbs), () => meaningQ(OPPOSITES), () => sayItQ(DAYS)])();
+    if (level === 10) return pick([() => meaningQ(PHRASES2), () => meaningQ(PHRASES2), () => picQ(ES2.clothes), () => numberQ(21, 99), () => numberQ(21, 99), () => sayItQ(OPPOSITES), () => sayItQ(ES2.family)])();
+    return pick([() => meaningQ(SENTENCES), () => meaningQ(SENTENCES), () => meaningQ(QWORDS), () => meaningQ(CONJ), () => sayItQ(CONJ), () => sayItQ(PHRASES2)])();
+  }
+
   function makeQuestion() {
-    const easy = brainEasy > 0;
-    if (brainEasy > 0) brainEasy--;
+    let level = brainAge, challenge = false;
+    if (brainEasy > 0) { brainEasy--; level = Math.max(6, brainAge - 1); } // after misses: a bit easier for a while
+    else if (Math.random() < CHALLENGE_CHANCE) { level = brainAge + 1; challenge = true; } // a grade harder, super prize
     const subject = learnMode === 'mix' ? pick(['math', 'spanish']) : learnMode;
-    return subject === 'math' ? mathQuestion(easy) : spanishQuestion(easy);
+    const q = subject === 'math' ? mathLevel(level) : spanishLevel(level);
+    q.challenge = challenge;
+    return q;
   }
 
   // Reads Spanish aloud (where the browser can)
@@ -2675,7 +2825,9 @@
       opts.appendChild(b);
     });
     const msg = document.getElementById('bMsg'); msg.className = 'bmsg';
-    msg.textContent = 'Answer right to win a prize!';
+    msg.textContent = brainQ.challenge ? '⭐ Challenge question! Get it right for a SUPER prize!' : 'Answer right to win a prize!';
+    document.querySelector('#brain .bcard').classList.toggle('challenge', !!brainQ.challenge);
+    document.querySelector('#brain .btag').innerHTML = brainQ.challenge ? '<span class="star">⭐ Challenge</span>' : '🧠 Brain Boost';
     document.getElementById('bStreak').textContent = brainStreak ? `🔥 ${brainStreak} in a row` : '';
     brainEl.hidden = false;
     if (brainQ.sayPrompt) sayEs(brainQ.sayPrompt);
@@ -2694,13 +2846,14 @@
       sound('pick');
       msg.className = 'bmsg good'; msg.textContent = `✅ Yes! ${brainQ.explain}`;
       const explain = brainQ.explain;
-      if (brainStreak % 3 === 0) setTimeout(showPrizes, 900);
+      if (brainQ.challenge) { brainStars++; msg.textContent = `⭐ Amazing! ${brainQ.explain}`; setTimeout(() => showPrizes(true), 900); }
+      else if (brainStreak % 3 === 0) setTimeout(() => showPrizes(false), 900);
       else setTimeout(() => showReward(pick(BRAIN_BOOSTS), explain), 900);
     } else {
       buttons[i].classList.add('wrong');
       brainStreak = 0;
       document.getElementById('bStreak').textContent = '';
-      if (++brainMisses >= 2) { brainEasy = 3; brainMisses = 0; } // a couple of easier ones next
+      if (!brainQ.challenge && ++brainMisses >= 2) { brainEasy = 3; brainMisses = 0; } // a couple of easier ones next (challenges don't count)
       msg.className = 'bmsg oops'; msg.textContent = `Almost! ${brainQ.explain}`;
       // Take your time reading the answer, then jump back in (no prize, no penalty)
       continueButton('OK, back in! ▶', () => { claimPrize(null); closeBrain(); });
@@ -2720,7 +2873,7 @@
     if (brainState === 'off') return;
     brainState = 'reward';
     const pu = POWERUPS[k];
-    document.getElementById('bQ').textContent = explain ? '✅ Correct!' : '🎁 Great pick!';
+    document.getElementById('bQ').textContent = explain ? '✅ Correct!' : SUPER_PRIZES.includes(k) && document.querySelector('#brain .bcard.challenge') ? '⭐ Super prize!' : '🎁 Great pick!';
     const pic = document.getElementById('bPic');
     pic.textContent = '';
     const icon = document.createElement('div'); icon.className = 'prize'; icon.textContent = pu.icon;
@@ -2738,15 +2891,16 @@
     sound('pick');
     continueButton("Let's go! ▶", () => { claimPrize(k); closeBrain(); });
   }
-  function showPrizes() {
+  // superPrize: after a challenge question, choose from the best items
+  function showPrizes(superPrize) {
     if (brainState !== 'answered') return;
     brainState = 'prize';
-    document.getElementById('bQ').textContent = 'Pick your prize! 🎁';
+    document.getElementById('bQ').textContent = superPrize ? '⭐ Pick your SUPER prize!' : 'Pick your prize! 🎁';
     document.getElementById('bStreak').textContent = `🔥 ${brainStreak} in a row`;
     document.getElementById('bPic').textContent = '';
     const opts = document.getElementById('bOpts');
     opts.textContent = '';
-    const choices = shuffle(['rapid', 'speed', 'mag', 'triple', 'golden', 'wall', 'heal', 'dome', 'turret', 'heart']).slice(0, 3);
+    const choices = shuffle(superPrize ? SUPER_PRIZES : ['rapid', 'speed', 'mag', 'triple', 'golden', 'wall', 'heal', 'dome', 'turret', 'heart']).slice(0, 3);
     choices.forEach((k, i) => {
       const pu = POWERUPS[k], b = document.createElement('button');
       b.textContent = pu.icon;
@@ -2781,9 +2935,18 @@
     learnMode = v;
     try { localStorage.setItem('pbwLearn', v); } catch (e) { /* storage blocked */ }
     for (const b of document.querySelectorAll('#learnSeg button')) b.classList.toggle('on', b.dataset.v === v);
+    document.getElementById('ageRow').hidden = v === 'off';
     if (me && mode !== 'client') me.learn = v !== 'off';
   }
   for (const b of document.querySelectorAll('#learnSeg button')) b.onclick = () => setLearnMode(b.dataset.v);
+  function setAge(a) {
+    brainAge = [7, 8, 9, 10].includes(a) ? a : 7;
+    brainEasy = 0;
+    try { localStorage.setItem('pbwAge', brainAge); } catch (e) { /* storage blocked */ }
+    for (const b of document.querySelectorAll('#ageSeg button')) b.classList.toggle('on', +b.dataset.v === brainAge);
+  }
+  for (const b of document.querySelectorAll('#ageSeg button')) b.onclick = () => setAge(+b.dataset.v);
+  setAge(brainAge);
   setLearnMode(learnMode);
 
   // ---------- Game loop / menu ----------
@@ -2926,7 +3089,7 @@
       li.textContent = `${p.name}${p === me ? ' (you)' : ''}: ${p.kills} splat${p.kills === 1 ? '' : 's'}`;
       list.appendChild(li);
     }
-    document.getElementById('goBrain').textContent = brainAll ? `🧠 Brain Boosts: ${brainOk} of ${brainAll} right!` : '';
+    document.getElementById('goBrain').textContent = brainAll ? `🧠 Brain Boosts: ${brainOk} of ${brainAll} right!${brainStars ? ` ⭐ ${brainStars} challenge${brainStars === 1 ? '' : 's'}!` : ''}` : '';
     document.getElementById('goLobby').hidden = mode !== 'host';
     document.getElementById('goWait').hidden = mode === 'host';
     gameOverEl.hidden = false;
