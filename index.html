@@ -141,6 +141,16 @@
   .bopts button.wrong { background: #ffd0d0; border-color: #b8336a; opacity: .7; }
   .bopts button:disabled { cursor: default; }
   .bmsg { min-height: 22px; font: 700 17px system-ui, sans-serif; }
+  .bpic .prize { display: inline-flex; align-items: center; justify-content: center; width: 110px; height: 110px; border-radius: 50%;
+    border: 6px solid; background: #1b1b1b; font-size: 60px; animation: pop .45s cubic-bezier(.3, 1.6, .5, 1); }
+  @keyframes pop { from { transform: scale(.2); } to { transform: scale(1); } }
+  @media (prefers-reduced-motion: reduce) { .bpic .prize { animation: none; } }
+  .pname { font: 900 26px system-ui, sans-serif; }
+  .pdesc { font: 600 16px system-ui, sans-serif; color: #444; margin-top: 2px; }
+  .pexp { font: 600 14px system-ui, sans-serif; color: #2a8a52; margin-top: 6px; }
+  .gorow { width: 100%; }
+  .gorow .go { width: 100%; min-height: 58px; border: 0; border-radius: 14px; background: #ff3d7f; color: #fff;
+    font: 900 24px system-ui, sans-serif; cursor: pointer; }
   .bmsg.good { color: #1c8a49; } .bmsg.oops { color: #b8336a; }
   #lobby { position: fixed; inset: 0; z-index: 15; display: flex; align-items: center; justify-content: center; background: rgba(10, 20, 12, 0.75); overflow-y: auto; }
   .lcard { background: #fff; color: #222; border-radius: 16px; padding: 18px 20px; width: min(420px, calc(100vw - 32px)); margin: 16px 0;
@@ -650,7 +660,8 @@
 
   function kill(victim, killer) {
     victim.alive = false;
-    victim.respawn = RESPAWN_TIME + (victim.learn ? 2 : 0); // a little longer to read the question
+    victim.respawn = RESPAWN_TIME;
+    victim.askT = 0;
     victim.deaths++;
     victim.streak = 0;
     victim.grudge = { id: killer.id, at: performance.now() }; // bots won't team with whoever just splatted them
@@ -1040,6 +1051,7 @@
     setTouchMode(false);
     const qn = ['Digit1', 'Digit2', 'Digit3', 'Numpad1', 'Numpad2', 'Numpad3'].indexOf(e.code) % 3;
     if (!brainEl.hidden && qn >= 0 && !e.repeat) { brainKey(qn); return; }
+    if (!brainEl.hidden && (e.code === 'Enter' || e.code === 'Space') && document.querySelector('#brain .go')) { e.preventDefault(); document.querySelector('#brain .go').click(); return; }
     keys[e.code] = true;
     if (e.code === 'KeyR' && me && me.alive) requestReload();
     if ((e.code === 'KeyE' || e.code === 'KeyQ') && me && me.alive && !e.repeat) requestUse(me.sel);
@@ -1267,6 +1279,9 @@
     }
     for (const p of players) {
       if (!p.alive) {
+        // A Brain Boost question pauses the countdown: no rush (up to 2 minutes)
+        const asking = p === me ? brainState !== 'off' : p.asking;
+        if (asking && (p.askT = (p.askT || 0) + dt) < 120) continue;
         p.respawn -= dt;
         if (p.respawn <= 0 && (p.isBot || autoRespawn)) spawn(p);
         continue;
@@ -1518,7 +1533,8 @@
           fire: !!m.fire, rl: num(m.rl), ss: num(m.ss), use: num(m.use), us: num(m.us),
         };
         conn.player.learn = !!m.ln;
-      } else if (m.t === 'brain' && conn.player && POWERUPS[m.k]) {
+        conn.player.asking = !!m.ask;
+      } else if (m.t === 'brain' && conn.player && (m.k == null || POWERUPS[m.k])) {
         brainReward(conn.player, m.k);
       }
     });
@@ -1760,7 +1776,7 @@
       sendTimer = 1 / 30;
       try {
         hostConn.send({ t: 'in', x: Math.round(me.x), y: Math.round(me.y), vx: Math.round(me.vx), vy: Math.round(me.vy),
-          aim: Math.round(me.aim * 100) / 100, fire: fire && me.ammo > 0, rl: reloadSeq, use: useSeq, us: useSlot, ss: me.ss, ln: learnMode !== 'off' });
+          aim: Math.round(me.aim * 100) / 100, fire: fire && me.ammo > 0, rl: reloadSeq, use: useSeq, us: useSlot, ss: me.ss, ln: learnMode !== 'off', ask: brainState !== 'off' && !me.alive });
       } catch (e) { /* dropped connection */ }
     }
   }
@@ -2622,7 +2638,9 @@
   function brainReward(p, k) {
     if (p.brainDeath === p.deaths) return; // one prize per splat
     p.brainDeath = p.deaths;
+    p.asking = false;
     if (!p.alive) spawn(p);
+    if (!k) return;
     givePowerup(p, k);
     fx({ t: 'pick', p: p.id, pn: p.name, k, x: p.x, y: p.y, sl: p.items.length });
   }
@@ -2657,7 +2675,7 @@
       opts.appendChild(b);
     });
     const msg = document.getElementById('bMsg'); msg.className = 'bmsg';
-    msg.textContent = 'Answer right to come back now with a boost!';
+    msg.textContent = 'Answer right to win a prize!';
     document.getElementById('bStreak').textContent = brainStreak ? `🔥 ${brainStreak} in a row` : '';
     brainEl.hidden = false;
     if (brainQ.sayPrompt) sayEs(brainQ.sayPrompt);
@@ -2674,22 +2692,51 @@
     if (i === brainQ.answer) {
       brainOk++; brainStreak++; brainMisses = 0;
       sound('pick');
-      if (brainStreak % 3 === 0) {
-        msg.className = 'bmsg good'; msg.textContent = `🔥 ${brainStreak} in a row! Pick your prize:`;
-        setTimeout(showPrizes, 700);
-      } else {
-        const k = pick(BRAIN_BOOSTS);
-        msg.className = 'bmsg good'; msg.textContent = `✅ Yes! ${brainQ.explain}. Bonus: ${POWERUPS[k].icon} ${POWERUPS[k].name}!`;
-        claimPrize(k);
-        setTimeout(closeBrain, 1100);
-      }
+      msg.className = 'bmsg good'; msg.textContent = `✅ Yes! ${brainQ.explain}`;
+      const explain = brainQ.explain;
+      if (brainStreak % 3 === 0) setTimeout(showPrizes, 900);
+      else setTimeout(() => showReward(pick(BRAIN_BOOSTS), explain), 900);
     } else {
       buttons[i].classList.add('wrong');
       brainStreak = 0;
+      document.getElementById('bStreak').textContent = '';
       if (++brainMisses >= 2) { brainEasy = 3; brainMisses = 0; } // a couple of easier ones next
-      msg.className = 'bmsg oops'; msg.textContent = `Almost! ${brainQ.explain}.`;
-      setTimeout(closeBrain, 2600); // or sooner, when you respawn
+      msg.className = 'bmsg oops'; msg.textContent = `Almost! ${brainQ.explain}`;
+      // Take your time reading the answer, then jump back in (no prize, no penalty)
+      continueButton('OK, back in! ▶', () => { claimPrize(null); closeBrain(); });
     }
+  }
+  // One big button under the card (also Enter, Space or 1)
+  function continueButton(text, go) {
+    const b = document.createElement('button');
+    b.className = 'go'; b.textContent = text;
+    b.onclick = () => { if (brainState === 'off') return; go(); };
+    const row = document.createElement('div'); row.className = 'gorow'; row.appendChild(b);
+    document.querySelector('#brain .bcard').appendChild(row); // at the bottom, under the message
+    b.focus({ preventScroll: true });
+  }
+  // The success screen: what you got and what it does
+  function showReward(k, explain) {
+    if (brainState === 'off') return;
+    brainState = 'reward';
+    const pu = POWERUPS[k];
+    document.getElementById('bQ').textContent = explain ? '✅ Correct!' : '🎁 Great pick!';
+    const pic = document.getElementById('bPic');
+    pic.textContent = '';
+    const icon = document.createElement('div'); icon.className = 'prize'; icon.textContent = pu.icon;
+    icon.style.color = pu.color; icon.style.borderColor = pu.color;
+    pic.appendChild(icon);
+    document.getElementById('bOpts').textContent = '';
+    const msg = document.getElementById('bMsg');
+    msg.className = 'bmsg good';
+    msg.textContent = '';
+    const line1 = document.createElement('div'); line1.className = 'pname'; line1.textContent = `You got ${pu.name}!`; line1.style.color = pu.color;
+    const line2 = document.createElement('div'); line2.className = 'pdesc';
+    line2.textContent = pu.place ? `${pu.desc}. Place it with ${touchMode ? 'its button' : 'its number key or E'}.` : `${pu.desc} until you get splatted.`;
+    msg.append(line1, line2);
+    if (explain) { const e = document.createElement('div'); e.className = 'pexp'; e.textContent = explain; msg.appendChild(e); }
+    sound('pick');
+    continueButton("Let's go! ▶", () => { claimPrize(k); closeBrain(); });
   }
   function showPrizes() {
     if (brainState !== 'answered') return;
@@ -2705,16 +2752,19 @@
       b.textContent = pu.icon;
       b.style.borderColor = pu.color;
       const sm = document.createElement('small'); sm.textContent = pu.name + (touchMode ? '' : ` · ${i + 1}`); b.appendChild(sm);
-      b.onclick = () => { if (brainState !== 'prize') return; brainState = 'done'; claimPrize(k); closeBrain(); };
+      b.onclick = () => { if (brainState === 'prize') showReward(k); };
       opts.appendChild(b);
     });
     document.getElementById('bMsg').textContent = '';
   }
   function brainKey(i) {
+    const go = document.querySelector('#brain .go');
+    if (go) { go.click(); return; }
     const b = document.querySelectorAll('#bOpts button')[i];
     if (b && !b.disabled) b.click();
   }
   function closeBrain() {
+    for (const row of document.querySelectorAll('#brain .gorow')) row.remove();
     brainEl.hidden = true;
     brainState = 'off';
     brainQ = null;
@@ -2723,11 +2773,9 @@
   function brainTick() {
     if (!me) return;
     if (brainWasAlive && !me.alive && learnMode !== 'off' && gameOver == null && (mode !== 'client' || me.joined)) openBrain();
-    if (me.alive && !brainWasAlive && brainState === 'ask') closeBrain(); // came back on the timer before answering
+    if (me.alive && !brainWasAlive && brainState !== 'off') closeBrain(); // back in some other way (left it for 2 minutes)
     brainWasAlive = me.alive;
-    if (!brainEl.hidden) {
-      document.getElementById('bTimer').textContent = me.alive ? '' : `Back in ${Math.ceil(me.respawn)}…`;
-    }
+    if (!brainEl.hidden) document.getElementById('bTimer').textContent = brainState === 'ask' ? 'Take your time 🙂' : '';
   }
   function setLearnMode(v) {
     learnMode = v;

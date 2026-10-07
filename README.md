@@ -31,9 +31,10 @@ Pick **Learning** on the start screen: Off, Math, Spanish or Mix (the default). 
 device, so each kid can have their own. With it on, getting splatted shows a quick question with
 3 big answer buttons (or press 1, 2, 3). Questions are pitched at about age 7.
 
-- **Right answer:** you come back right away with a bonus boost.
-- **Wrong answer:** no penalty. The card shows the answer and you come back on the timer
-  (5 seconds with learning on, so there's time to read).
+- **No rush:** the respawn countdown waits while the question is up.
+- **Right answer:** a reward screen shows the prize you won and what it does; tap **Let's go!**
+  (or press Enter) to jump back in with it.
+- **Wrong answer:** no penalty. The card shows the right answer; tap **OK, back in!** to keep playing.
 - **3 in a row:** pick your own prize, a boost or a defense.
 - **Two misses in a row:** the next few questions are easier.
 - Your score shows as 🧠 right/total in the corner and on the win screen.
