@@ -104,6 +104,8 @@
   #teamList .yes { background: #3dff8b; color: #102a17; }
   #teamList .quit { background: #eee; color: #b8336a; }
   #teamList .empty { color: #777; font-size: 14px; }
+  #teamList .chips button { width: 30px; height: 26px; border-radius: 7px; border: 2px solid transparent; padding: 0; cursor: pointer; opacity: .35; }
+  #teamList .chips button.on { opacity: 1; border-color: #222; }
   #teamList .tag { font-size: 11px; color: #777; border: 1px solid #ccc; border-radius: 4px; padding: 0 5px; }
   #update:disabled { cursor: default; opacity: .85; }
   #gameover { position: fixed; inset: 0; z-index: 16; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,.45); }
@@ -205,7 +207,7 @@
 <div id="teamPanel" hidden>
   <div class="tcard" role="dialog" aria-labelledby="teamTitle">
     <div class="thead"><h2 id="teamTitle">Teams</h2><button id="teamClose" aria-label="Close">✕</button></div>
-    <p class="tnote">Teammates' paint passes through each other, turrets won't shoot your teammate,
+    <p class="tnote" id="teamNote">Teammates' paint passes through each other, turrets won't shoot your teammate,
       and teammates show on your minimap. Leaving a team takes 3 seconds.
       Bots can be teammates too: each has at most one, and won't team with someone who just splatted them.</p>
     <ul id="teamList"></ul>
@@ -1091,7 +1093,7 @@
     const n = ['Digit1', 'Digit2', 'Digit3', 'Numpad1', 'Numpad2', 'Numpad3'].indexOf(e.code) % 3;
     if (n >= 0 && e.code.length && me && me.alive && !e.repeat) requestUse(n);
     if (e.code === 'Tab' && running) { e.preventDefault(); cycleSel(1); }
-    if (e.code === 'KeyT' && running && !teamMode && !e.repeat) toggleTeamPanel();
+    if (e.code === 'KeyT' && running && (!teamMode || mode === 'host') && !e.repeat) toggleTeamPanel();
     if (e.code === 'Escape') teamPanel.hidden = true;
     if ((e.code === 'KeyY' || e.code === 'KeyN') && running && !e.repeat) answerTeam(e.code === 'KeyY');
   });
@@ -1311,6 +1313,7 @@
       }
     }
     for (const p of players) {
+      if (p.awayUntil && !p.alive) continue; // disconnected: waiting for them to come back
       if (!p.alive) {
         // A Brain Boost question pauses the countdown: no rush (up to 2 minutes)
         const asking = p === me ? brainState !== 'off' : p.asking;
@@ -1521,10 +1524,13 @@
       if (m.t === 'hello' && !conn.player) {
         if (updating) { conn.close(); return; } // about to reload: friends will retry and find the new page
         if (pageVersion && m.v && m.v !== pageVersion) { conn.send({ t: 'oldver' }); setTimeout(() => conn.close(), 500); return; }
-        // A friend coming back after an update gets their old player (score, boosts, spot) back
-        const back = m.rejoin && players.find(p => p.remote && p.id === m.rejoin && p.awayUntil);
+        // A friend coming back (after an update or a dropped connection) gets their old player back:
+        // same team and score. Matched by the id their device remembers, or failing that by name.
+        const away = players.filter(p => p.remote && p.awayUntil);
+        const back = (m.rejoin && away.find(p => p.id === m.rejoin)) || away.find(p => p.name === cleanName(m.name));
         if (back) {
           back.awayUntil = 0; back.shield = SPAWN_SHIELD; back.inp = null; back.useSeen = undefined; back.rlSeen = undefined;
+          if (!back.alive) spawn(back);
           conn.player = back;
           conn.send({ t: 'welcome', id: back.id, seed: mapSeed, code: roomCode, teams: teamMode });
           fx({ t: 'msg', s: `${back.name} is back` });
@@ -1582,12 +1588,10 @@
       broadcastLobby();
     }
     if (conn.player && mode === 'host' && !updating) { // during an update, friends drop off on purpose
-      conn.player.alive = false;
-      players = players.filter(p => p !== conn.player);
-      removeDeploysOf(conn.player.id);
-      dropTeamsOf(conn.player.id);
-      fx({ t: 'msg', s: `${conn.player.name} left the game` });
-      rebalanceBots(conn.player.team);
+      // Bad connection? Keep their player (team, score) out of play for 90 seconds in case they come back
+      const p = conn.player;
+      p.awayUntil = performance.now() + 90000; p.inp = null; p.alive = false;
+      fx({ t: 'msg', s: `${p.name} lost connection, saving their spot…` });
     }
   }
 
@@ -1666,6 +1670,16 @@
 
   // opts: { code, tries } for retries of a normal join, or { code, id, paint, gen, fresh, tries }
   // when coming back after the host's update
+  let myGen = 0; // which address the host is at after its updates (see hostGame)
+  // The connection to the host dropped mid-game: go back to the menu and keep trying to rejoin as
+  // the same player for about 90 seconds (the host saves the spot that long)
+  function reconnect() {
+    const code = roomCode, id = me && me.id, gen = myGen;
+    stopNet();
+    endGame('');
+    document.getElementById('code').value = code;
+    joinGame({ code, id, gen, drop: true, tries: 0 });
+  }
   function joinGame(opts) {
     if (connecting || running) return;
     const back = !!(opts && opts.id);
@@ -1675,7 +1689,8 @@
     connecting = true;
     const tries = (opts && opts.tries) || 0;
     const maxTries = back ? 45 : 3; // about 90 seconds after an update, a few seconds otherwise
-    netMsg(back ? `Updated! Rejoining room ${code}…${tries ? ` (${tries * 2}s)` : ''}` : tries ? `Looking for room ${code}…` : `Joining room ${code}…`);
+    netMsg(opts && opts.drop ? `Connection lost. Reconnecting to room ${code}…${tries ? ` (${tries * 2}s)` : ''}`
+      : back ? `Updated! Rejoining room ${code}…${tries ? ` (${tries * 2}s)` : ''}` : tries ? `Looking for room ${code}…` : `Joining room ${code}…`);
     // After an update the host is at CODE-gen; every third try also checks the plain code
     const target = PEER_PREFIX + code + (back && opts.gen && tries % 3 !== 2 ? '-' + opts.gen : '');
     const pr = peer = new Peer();
@@ -1692,7 +1707,11 @@
     pr.on('open', () => {
       if (peer !== pr) return;
       const conn = hostConn = pr.connect(target, { reliable: true });
-      conn.on('open', () => conn.send({ t: 'hello', name: document.getElementById('name').value.trim() || 'Friend', color: chosen, v: pageVersion, rejoin: back ? opts.id : undefined }));
+      // Coming back to a room you were just in? Tell the host who you were.
+      let last = {};
+      try { last = JSON.parse(localStorage.getItem('pbwLast') || '{}'); } catch (e) { /* storage blocked */ }
+      const rejoinId = back ? opts.id : last.code === code ? last.id : undefined;
+      conn.on('open', () => conn.send({ t: 'hello', name: document.getElementById('name').value.trim() || 'Friend', color: chosen, v: pageVersion, rejoin: rejoinId }));
       conn.on('data', m => {
         if (!m || typeof m !== 'object' || peer !== pr) return;
         if (m.t === 'lobby' && !running && Array.isArray(m.people)) {
@@ -1708,6 +1727,8 @@
           lastSnap = performance.now();
           startGame('client', { seed: num(m.seed, 1), id: String(m.id), teams: clamp(num(m.teams), 0, 4) | 0 });
           if (back && opts.paint) restorePaint(opts.paint);
+          myGen = back ? num(opts.gen) : myGen;
+          try { localStorage.setItem('pbwLast', JSON.stringify({ code, id: String(m.id) })); } catch (e) { /* storage blocked */ }
         } else if (m.t === 'tolobby' && running) {
           running = false; me = null; players = []; balls = []; bases = []; gameOver = null; teamMode = 0;
           gameOverEl.hidden = true; // the host's lobby message follows
@@ -1716,6 +1737,7 @@
           updating = true;
           saveState({ f: SAVE_FORMAT, at: Date.now(), mode: 'client', roomCode, myId: me && me.id, name: me && me.name, color: chosen,
             paint: paintData(), gen: num(m.gen) });
+          myGen = num(m.gen);
           stopNet();
           reloadFresh();
         } else if (m.t === 'oldver') {
@@ -1738,6 +1760,7 @@
       conn.on('close', () => {
         if (peer !== pr || updating) return;
         if (!running && retry()) return;
+        if (running) { reconnect(); return; } // dropped mid-game: try to get back in by ourselves
         netFail('The host left the game.');
       });
     });
@@ -1745,7 +1768,8 @@
       if (peer !== pr) return;
       clearTimeout(timer);
       if (!running && retry()) return;
-      if (err.type === 'peer-unavailable') netFail(`No game found with code ${code}. Check the code. If the host just updated the game, try again in a minute.`);
+      if (opts && opts.drop) netFail(`Couldn't get back into room ${code}. The host may have left the game.`);
+      else if (err.type === 'peer-unavailable') netFail(`No game found with code ${code}. Check the code. If the host just updated the game, try again in a minute.`);
       else if (!running) netFail(NO_SERVER);
       // Once playing, only a closed connection to the host ends the game (see 'close' above)
     });
@@ -1793,7 +1817,7 @@
 
   function clientUpdate(dt) {
     // Backup for a host whose tab closed without saying goodbye
-    if (performance.now() - lastSnap > 6000) { netFail('Lost connection to the host.'); return; }
+    if (performance.now() - lastSnap > 6000) { reconnect(); return; }
     let fire = false;
     if (me.alive) fire = localControl(me, dt);
     const k = Math.min(1, dt * 15);
@@ -2535,11 +2559,20 @@
   document.getElementById('teamYes').onclick = () => answerTeam(true);
   document.getElementById('teamNo').onclick = () => answerTeam(false);
 
+  const TEAM_NOTE = document.getElementById('teamNote').textContent;
+  function moveToTeam(p, t) {
+    if (mode !== 'host' || p.team === t || !TEAM_INFO[t]) return;
+    p.team = t; p.color = TEAM_INFO[t].color; p.target = null;
+    if (p.alive) p.shield = Math.max(p.shield, 2);
+    fx({ t: 'msg', s: `${p.name} moved to Team ${TEAM_INFO[t].name}` });
+  }
   function refreshTeamsUI() {
-    const show = running && !!me && !teamMode; // set teams replace ask-to-team-up
-    const others = show ? players.filter(q => q !== me).sort((a, b) => a.isBot - b.isBot || a.name.localeCompare(b.name)) : [];
-    const ask = show ? incomingAsk() : null;
-    const sig = [show, teamPanel.hidden, ask && ask.id, others.map(q => q.id + q.name + q.color).join(),
+    // Team games: only the host gets this, to move people between teams. Otherwise: ask-to-team-up.
+    const show = running && !!me && (!teamMode || mode === 'host');
+    const others = !show ? [] : teamMode ? players.filter(q => !q.isBot)
+      : players.filter(q => q !== me).sort((a, b) => a.isBot - b.isBot || a.name.localeCompare(b.name));
+    const ask = show && !teamMode ? incomingAsk() : null;
+    const sig = [show, teamMode, teamPanel.hidden, ask && ask.id, others.map(q => q.id + q.name + q.color + q.team).join(), activeTeams().join(),
       JSON.stringify(Object.entries(alliances).map(([k, v]) => [k, Math.ceil(v.breakT)])), Object.keys(requests).join()].join('~');
     if (sig === teamSig) return;
     teamSig = sig;
@@ -2550,6 +2583,27 @@
     if (ask) document.getElementById('teamAskText').textContent = `${ask.name} wants to team up`;
     if (teamPanel.hidden) return;
     teamList.textContent = '';
+    document.getElementById('teamNote').textContent = teamMode
+      ? 'Move people to another team, for example after someone reconnects. Only the host can do this.' : TEAM_NOTE;
+    if (teamMode) {
+      for (const q of others) {
+        const li = document.createElement('li');
+        const dot = document.createElement('span'); dot.className = 'dot'; dot.style.background = q.color;
+        const nm = document.createElement('span'); nm.className = 'nm'; nm.textContent = q.name + (q === me ? ' (you)' : '');
+        const chips = document.createElement('div'); chips.className = 'chips';
+        for (const t of activeTeams()) {
+          const c = document.createElement('button');
+          c.style.background = TEAM_INFO[t].color;
+          c.title = c.ariaLabel = `Move to Team ${TEAM_INFO[t].name}`;
+          c.classList.toggle('on', q.team === t);
+          c.onclick = () => moveToTeam(q, t);
+          chips.appendChild(c);
+        }
+        li.append(dot, nm, chips);
+        teamList.appendChild(li);
+      }
+      return;
+    }
     if (!others.length) {
       const li = document.createElement('li'); li.className = 'empty';
       li.textContent = 'Nobody else is here right now.';

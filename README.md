@@ -111,6 +111,11 @@ for another round. Bots play the objective too: most attack the nearest enemy ba
 and they all rush back when their base is under attack.
 
 A friend who joins mid-game goes to the team with the fewest people and takes a bot's spot.
+
+**Bad connection?** If a friend's connection drops, the host keeps their player (team and score) for
+90 seconds, and their game reconnects by itself. Joining the same room again within that time, from the
+same device or with the same name, also brings them back as themselves. In team games the host can tap
+**👥 Teams** (or press **T**) to move anyone to another team mid-game.
 Up to 8 people can play at once (the rest of the 30 spots are bots), since the host's device sends
 the game to every friend.
 
