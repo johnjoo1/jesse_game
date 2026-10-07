@@ -36,7 +36,7 @@ shows a question at that age's level, with 3 big answer buttons (or press 1, 2, 
   (or press Enter) to jump back in with it.
 - **Wrong answer:** no penalty. The card shows the right answer; tap **OK, back in!** to keep playing.
 - **⭐ Challenge questions:** about 1 in 4 questions is one grade harder, on a purple card. Get it
-  right to pick a **super prize**: Golden Gun, Sentry Turret, Triple Shot or Shield Dome. Missing a
+  right to pick a **super prize**: Golden Gun, Sentry Turret, Triple Shot, Shield Dome or Paint Mine. Missing a
   challenge doesn't count against you.
 - **3 in a row:** pick your own prize, a boost or a defense.
 - **Two misses in a row:** the next few questions are a grade easier.
@@ -61,11 +61,11 @@ Bots grab them too, and unclaimed drops fade after 20 seconds.
 
 | Power-up | Chance | What it does |
 |---|---|---|
-| ♥ Extra Heart | 15% | +1 max health (up to +3) and a full heal |
-| ⚡ Rapid Fire | 15% | Shoot twice as fast |
-| » Speed Boots | 12% | Run 30% faster |
-| ▤ Big Hopper | 12% | 24 paintballs and faster reloads |
-| ⁂ Triple Shot | 9% | Every shot fires 3 paintballs |
+| ♥ Extra Heart | 13% | +1 max health (up to +3) and a full heal |
+| ⚡ Rapid Fire | 13% | Shoot twice as fast |
+| » Speed Boots | 11% | Run 30% faster |
+| ▤ Big Hopper | 11% | 24 paintballs and faster reloads |
+| ⁂ Triple Shot | 8% | Every shot fires 3 paintballs |
 | ★ Golden Gun | 3% | Every hit counts double |
 
 **Defenses** go into one of 3 carry slots, shown as numbered boxes above your ammo. Press **1**, **2**
@@ -73,18 +73,20 @@ or **3** to place that one, or **E** / right-click to place the highlighted one 
 the mouse wheel or Tab). On a phone, each carried defense gets its own button. With all 3 slots full,
 defenses stay on the ground for someone else. You lose carried defenses when you're splatted.
 
-A placed defense stays where you put it. Ones that can be shot down have no timer: they last until
-destroyed (bots go after enemy turrets), and each player can have up to 3 of them standing; placing a
-4th removes their oldest. The others run on a timer.
+A placed defense stays where you put it. Barricades, turrets and mines have no timer: they last until
+destroyed or set off (bots go after enemy turrets), and each player can have up to 3 of them standing;
+placing a 4th removes their oldest. The others run on a timer.
 
 | Defense | Chance | What it does |
 |---|---|---|
-| ▮ Barricade | 12% | A wall across your line of fire that anyone can hide behind: it blocks everyone's paint, yours included. Stays until it takes 8 hits |
-| ✚ Heal Station | 9% | Heals anyone standing in it (friend, foe or bot) 1 health every 1.5s. Lasts 20s |
-| ◠ Shield Dome | 7% | Enemy paint can't get in; you can shoot out. Lasts 10s |
-| ⊕ Sentry Turret | 6% | Shoots enemies within range; its splats count for you. Stays until it takes 5 hits |
+| ▮ Barricade | 11% | A wall across your line of fire that anyone can hide behind: it blocks everyone's paint, yours included. Stays until it takes 8 hits |
+| ✚ Heal Station | 8% | Heals anyone standing in it (friend, foe or bot) 1 health every 1.5s. Lasts 20s |
+| ◠ Shield Dome | 6% | Enemy paint can't get in; you can shoot out. Lasts 10s |
+| ⊕ Sentry Turret | 5% | Shoots enemies within range; its splats count for you. Stays until it takes 5 hits |
+| 🌳 Bush | 7% | A hiding spot placed right where you stand. Bots can't see you inside unless they're right next to it, and other players see you faded. Lasts 90s |
+| 💣 Paint Mine | 5% | A hidden trap at your feet. Only you and your teammates can see it. It arms after 1 second; the first enemy to step on it sets it off, and everyone nearby (except your side) takes 2 hits, counted as your splats. Stays until it goes off |
 
-Chances are per drop, so a Golden Gun turns up about once every 67 splats.
+Chances are per drop, so a Golden Gun turns up about once every 75 splats.
 
 ## Playing with friends
 

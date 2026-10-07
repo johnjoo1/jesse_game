@@ -328,6 +328,8 @@
     heal:   { w: 9,  place: true, name: 'Heal Station',  icon: '✚', color: '#3dff8b', desc: 'Heals anyone standing in it (20s)' },
     dome:   { w: 7,  place: true, name: 'Shield Dome',   icon: '◠', color: '#7fd4ff', desc: "Enemy paint can't get in (10s)" },
     turret: { w: 6,  place: true, name: 'Sentry Turret', icon: '⊕', color: '#c78bff', desc: 'Shoots enemies near it until it takes 5 hits' },
+    bush:   { w: 8,  place: true, name: 'Bush',          icon: '🌳', color: '#4cbb4c', desc: "A hiding spot: bots can't see you inside (90s)" },
+    mine:   { w: 6,  place: true, name: 'Paint Mine',    icon: '💣', color: '#ff5a3d', desc: 'A hidden trap: an enemy who steps on it takes 2 hits' },
   };
   const MAX_CARRY = 3;           // defenses you can carry at once (slots 1-3)
   const MAX_LASTING = 3;         // barricades + turrets one player can have standing; a 4th replaces their oldest
@@ -337,6 +339,8 @@
     heal:   { ttl: 20, r: 60 },
     dome:   { ttl: 10, r: 75 },
     turret: { ttl: 0, hp: 5, range: 380, rate: 0.5 },
+    bush:   { ttl: 90, r: 62 },
+    mine:   { ttl: 0, r: 95, trigger: 32, arm: 1 }, // no timer: it waits until someone steps on it
   };
   const BOT_NAMES = ['Splatty', 'Blobby', 'Drip', 'Smudge', 'Neon', 'Goober', 'Pellet', 'Squish', 'Rainbow', 'Sploosh', 'Zippy', 'Mango',
     'Gloop', 'Speckle', 'Dribble', 'Fizz', 'Noodle', 'Puddle', 'Swirl', 'Bonk', 'Wobble', 'Spritz', 'Jelly', 'Blotch', 'Squirt', 'Doodle',
@@ -525,6 +529,7 @@
   }
   function inBush(p) {
     for (const b of bushes) if (dist2(p.x, p.y, b.x, b.y) < (b.r - 6) ** 2) return true;
+    for (const d of deploys) if (d.type === 'bush' && dist2(p.x, p.y, d.x, d.y) < (DEPLOY.bush.r - 6) ** 2) return true;
     return false;
   }
 
@@ -715,6 +720,8 @@
       d.w = across ? 20 : 110; d.h = across ? 110 : 20;
     } else if (type === 'turret') {
       d.x = p.x + ca * 34; d.y = p.y + sa * 34;
+    } else if (type === 'mine') {
+      d.cool = cfg.arm; // arms after a moment, so it can't go off in someone's face
     }
     d.x = clamp(d.x, 20, WORLD - 20); d.y = clamp(d.y, 20, WORLD - 20);
     deploys.push(d);
@@ -748,6 +755,18 @@
           if (!q.alive || dist2(q.x, q.y, d.x, d.y) >= DEPLOY.heal.r ** 2) continue;
           q.healT += dt;
           if (q.healT >= 1.5 && q.hp < q.maxHp) { q.healT = 0; q.hp++; fx({ t: 'heal', p: q.id, x: q.x, y: q.y }); }
+        }
+      }
+      if (d.type === 'mine' && owner) {
+        if (d.cool > 0) d.cool -= dt;
+        else if (players.some(q => q.alive && !friendly(q.id, d.owner) && dist2(q.x, q.y, d.x, d.y) < DEPLOY.mine.trigger ** 2)) {
+          removeDeploy(d, false);
+          fx({ t: 'boom', x: d.x, y: d.y, c: owner.color });
+          for (const q of players) {
+            if (!q.alive || friendly(q.id, d.owner) || dist2(q.x, q.y, d.x, d.y) > DEPLOY.mine.r ** 2) continue;
+            hitPlayer(q, { x: q.x, y: q.y, color: owner.color, owner, dmg: 2 }); // counts as the owner's splat
+          }
+          continue;
         }
       }
       if (d.type === 'turret' && owner) {
@@ -923,9 +942,16 @@
         if (mine) banner = { text: `Team with ${other} ends in ${TEAM_BREAK_TIME}…`, sub: 'Get to cover!', t: TEAM_BREAK_TIME, color: '#ff8a3d' };
       } else if (e.e === 'over') addFeed(`${e.an} and ${e.bn} are no longer a team`, mine);
     }
-    else if (e.t === 'dep') {
+    else if (e.t === 'boom') {
+      // Mine: a big burst of paint
+      splat(e.x, e.y, e.c, 46);
+      for (let i = 0; i < 8; i++) splat(e.x + rand(-80, 80), e.y + rand(-80, 80), e.c, rand(10, 20));
+      burst(e.x, e.y, e.c, 60, 520); burst(e.x, e.y, '#ffffff', 20, 300);
+      rings.push({ x: e.x, y: e.y, t: 0, color: e.c });
+      if (me && dist2(me.x, me.y, e.x, e.y) < 700 * 700) { shake = 16; sound('kill'); }
+    } else if (e.t === 'dep') {
       const pu = POWERUPS[e.k];
-      if (pu) burst(e.x, e.y, pu.color, 18, 200);
+      if (pu && e.k !== 'mine') burst(e.x, e.y, pu.color, 18, 200); // a mine goes down quietly
       if (e.p === myId) sound('pick');
     } else if (e.t === 'heal') {
       burst(e.x, e.y, '#3dff8b', 8, 120);
@@ -2127,6 +2153,16 @@
         ctx.fillRect(d.x - pl * 2, d.y - pl / 2, pl * 4, pl); ctx.fillRect(d.x - pl / 2, d.y - pl * 2, pl, pl * 4);
         ctx.strokeStyle = d.color; ctx.lineWidth = 4;   // timer ring in the owner's color
         ctx.beginPath(); ctx.arc(d.x, d.y, R + 6, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * (d.ttl / DEPLOY.heal.ttl)); ctx.stroke();
+      } else if (d.type === 'mine') {
+        if (me && friendly(d.owner, me.id)) {
+          ctx.globalAlpha = 0.85;
+          ctx.fillStyle = '#2a2a2a'; ctx.beginPath(); ctx.arc(d.x, d.y, 13, 0, Math.PI * 2); ctx.fill();
+          ctx.strokeStyle = d.color; ctx.lineWidth = 3; ctx.stroke();
+          const on = d.cool > 0 || Math.floor(now * 2.5) % 2 === 0;
+          ctx.fillStyle = on ? '#ff3b30' : '#5a1a1a'; ctx.beginPath(); ctx.arc(d.x, d.y, 4, 0, Math.PI * 2); ctx.fill();
+          ctx.globalAlpha = 0.18; ctx.strokeStyle = '#ff3b30'; ctx.setLineDash([6, 8]); ctx.lineWidth = 2;
+          ctx.beginPath(); ctx.arc(d.x, d.y, DEPLOY.mine.r, 0, Math.PI * 2); ctx.stroke(); ctx.setLineDash([]);
+        }
       } else if (d.type === 'turret') {
         ctx.fillStyle = 'rgba(0,0,0,.25)'; ctx.beginPath(); ctx.arc(d.x + 4, d.y + 4, 17, 0, Math.PI * 2); ctx.fill();
         ctx.fillStyle = '#3a3f4a'; ctx.beginPath(); ctx.arc(d.x, d.y, 17, 0, Math.PI * 2); ctx.fill();
@@ -2166,16 +2202,23 @@
       ctx.restore();
     }
 
-    // Bushes drawn on top so players hide in them
-    for (const b of bushes) {
-      if (!seen(b.x - b.r, b.y - b.r, b.r * 2, b.r * 2)) continue;
+    // Bushes drawn on top so players hide in them (placed ones blink before they go)
+    const drawBush = (x, y, r, seed) => {
       ctx.fillStyle = 'rgba(40, 110, 45, 0.88)';
-      ctx.beginPath(); ctx.arc(b.x, b.y, b.r, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
       ctx.fillStyle = 'rgba(70, 150, 70, 0.9)';
       for (let k = 0; k < 5; k++) {
-        const a = k * 1.256 + b.r;
-        ctx.beginPath(); ctx.arc(b.x + Math.cos(a) * b.r * 0.45, b.y + Math.sin(a) * b.r * 0.45, b.r * 0.42, 0, Math.PI * 2); ctx.fill();
+        const a = k * 1.256 + seed;
+        ctx.beginPath(); ctx.arc(x + Math.cos(a) * r * 0.45, y + Math.sin(a) * r * 0.45, r * 0.42, 0, Math.PI * 2); ctx.fill();
       }
+    };
+    for (const b of bushes) if (seen(b.x - b.r, b.y - b.r, b.r * 2, b.r * 2)) drawBush(b.x, b.y, b.r, b.r);
+    for (const d of deploys) {
+      if (d.type !== 'bush' || !seen(d.x - 70, d.y - 70, 140, 140)) continue;
+      ctx.save();
+      if (d.ttl < 5 && Math.floor(d.ttl * 6) % 2 === 0) ctx.globalAlpha = 0.45;
+      drawBush(d.x, d.y, DEPLOY.bush.r, d.id);
+      ctx.restore();
     }
 
     for (const q of particles) {
@@ -2355,6 +2398,7 @@
     for (const o of rocks) { ctx.beginPath(); ctx.arc(mx0 + o.x * s, my0 + o.y * s, o.r * s, 0, Math.PI * 2); ctx.fill(); }
     for (const d of deploys) {
       if (d.type === 'wall') continue; // already drawn with the walls
+      if (d.type === 'mine' && !(me && friendly(d.owner, me.id))) continue; // enemy mines stay secret
       ctx.strokeStyle = POWERUPS[d.type].color; ctx.lineWidth = 1.5;
       ctx.beginPath(); ctx.arc(mx0 + d.x * s, my0 + d.y * s, 4, 0, Math.PI * 2); ctx.stroke();
     }
@@ -2540,7 +2584,7 @@
   let brainAge = 7;
   try { brainAge = +localStorage.getItem('pbwAge') || 7; } catch (e) { /* storage blocked */ }
   const CHALLENGE_CHANCE = 0.25;  // about 1 question in 4 is a grade harder, for a super prize
-  const SUPER_PRIZES = ['golden', 'turret', 'triple', 'dome'];
+  const SUPER_PRIZES = ['golden', 'turret', 'triple', 'dome', 'mine'];
   let brainQ = null, brainState = 'off', brainWasAlive = true;
 
   const ri = (a, b) => a + Math.floor(Math.random() * (b - a + 1));
@@ -2900,7 +2944,7 @@
     document.getElementById('bPic').textContent = '';
     const opts = document.getElementById('bOpts');
     opts.textContent = '';
-    const choices = shuffle(superPrize ? SUPER_PRIZES : ['rapid', 'speed', 'mag', 'triple', 'golden', 'wall', 'heal', 'dome', 'turret', 'heart']).slice(0, 3);
+    const choices = shuffle(superPrize ? SUPER_PRIZES : ['rapid', 'speed', 'mag', 'triple', 'golden', 'wall', 'heal', 'dome', 'turret', 'heart', 'bush', 'mine']).slice(0, 3);
     choices.forEach((k, i) => {
       const pu = POWERUPS[k], b = document.createElement('button');
       b.textContent = pu.icon;
